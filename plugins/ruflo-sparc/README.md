@@ -55,10 +55,56 @@ sparc report                 # Generate full SPARC methodology report with trace
 | `sparc-gates` | Gate check results and history |
 | `patterns` | Learned SPARC execution patterns |
 
+## Compatibility
+
+- **CLI:** pinned to `@claude-flow/cli` v3.6 major+minor.
+- **Verification:** `bash plugins/ruflo-sparc/scripts/smoke.sh` is the contract.
+
+## Phase-to-plugin alignment
+
+Each SPARC phase has a canonical handoff plugin that owns its deeper tooling:
+
+| Phase | Owner | What it provides |
+|-------|-------|-----------------|
+| **Specification** | [ruflo-goals](../ruflo-goals/docs/adrs/0001-goals-contract.md) (deep-research) | Multi-source research orchestration to gather requirements |
+| **Pseudocode** | `ruflo-sparc` (this plugin) | Pseudocode generation + complexity annotation |
+| **Architecture** | [ruflo-adr](../ruflo-adr/docs/adrs/0001-adr-plugin-pattern.md) + [ruflo-ddd](../ruflo-ddd/docs/adrs/0001-ddd-contract.md) | ADR creation + bounded-context modeling |
+| **Refinement** | [ruflo-jujutsu](../ruflo-jujutsu/docs/adrs/0001-jujutsu-contract.md) + ruflo-testgen | Diff-aware refactor + test gap analysis |
+| **Completion** | [ruflo-docs](../ruflo-docs/docs/adrs/0001-docs-contract.md) | Auto-generated documentation |
+
+This plugin orchestrates the lifecycle; sibling plugins do the deep work per phase.
+
+## Namespace coordination
+
+This plugin owns three AgentDB namespaces, all kebab-case compliant per [ruflo-agentdb ADR-0001 §"Namespace convention"](../ruflo-agentdb/docs/adrs/0001-agentdb-optimization.md):
+
+| Namespace | Purpose |
+|-----------|---------|
+| `sparc-state` | Current phase tracking per feature |
+| `sparc-phases` | Phase artifacts (specs, pseudocode, ADRs, reports) |
+| `sparc-gates` | Gate check results and history |
+
+Additionally, the shared `patterns` (plural) namespace is consumed (not owned) for cross-feature SPARC pattern learning — note the pluralization (different from the singular `pattern` ReasoningBank target). Reserved namespaces (`pattern`, `claude-memories`, `default`) MUST NOT be shadowed.
+
+## Verification
+
+```bash
+bash plugins/ruflo-sparc/scripts/smoke.sh
+# Expected: "11 passed, 0 failed"
+```
+
+## Architecture Decisions
+
+- [`ADR-0001` — ruflo-sparc plugin contract (phase-to-plugin alignment, namespace coordination, smoke as contract)](./docs/adrs/0001-sparc-contract.md)
+
 ## Related Plugins
 
-- `ruflo-ddd` -- Architecture phase uses DDD bounded context patterns
+- `ruflo-agentdb` — namespace convention owner; backing store for sparc-state/-phases/-gates
+- `ruflo-goals` — Specification phase deep-research
 - `ruflo-adr` -- Architecture decisions recorded as ADRs in Phase 3
+- `ruflo-ddd` -- Architecture phase uses DDD bounded context patterns
+- `ruflo-jujutsu` -- Refinement phase diff analysis
+- `ruflo-docs` -- Completion phase documentation generation
 
 ## License
 

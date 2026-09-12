@@ -532,10 +532,12 @@ export class ProviderFactory {
     return {
       name: 'anthropic',
       displayName: options?.displayName ?? 'Anthropic Claude',
+      // #1810 — bumped to current Claude 4.x model IDs (Opus 4.7,
+      // Sonnet 4.6, Haiku 4.5). Was pinning a year-old set.
       models: options?.models ?? [
-        'claude-opus-4-5-20251101',
-        'claude-sonnet-4-20250514',
-        'claude-3-5-haiku-20241022',
+        'claude-opus-4-7',
+        'claude-sonnet-4-6',
+        'claude-haiku-4-5-20251001',
       ],
       capabilities: [
         'completion',

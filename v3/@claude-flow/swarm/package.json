@@ -1,6 +1,6 @@
 {
   "name": "@claude-flow/swarm",
-  "version": "3.0.0-alpha.6",
+  "version": "3.0.0-alpha.7",
   "type": "module",
   "description": "Standalone swarm coordination - up to 100+ agents, 4 topologies, hive-mind, consensus",
   "main": "dist/index.js",
@@ -14,7 +14,7 @@
     "build": "tsc"
   },
   "devDependencies": {
-    "vitest": "^4.0.16"
+    "vitest": "^4.1.0"
   },
   "keywords": [
     "swarm",

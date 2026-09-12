@@ -122,6 +122,9 @@ describe('Swarm Integration Tests', () => {
     expect(stateAfter.topology).toBe('hierarchical');
   });
 
+  // ruflo#1872 — fixed: SwarmCoordinator.executeTask now wraps the
+  // agent call in try/catch so a thrown error becomes a structured
+  // {status:'failed', error} result.
   it('should handle agent failures gracefully', async () => {
     const agent = await coordinator.spawnAgent({
       id: 'fragile-agent',
@@ -191,6 +194,9 @@ describe('Swarm Integration Tests', () => {
     expect(connections.every(c => c.type === 'peer')).toBe(true);
   });
 
+  // ruflo#1872 — fixed: scaleAgents({count:N}) now interprets count as
+  // the TARGET TOTAL of that agent type (spawning or terminating to
+  // reach it) rather than as a delta.
   it('should handle dynamic agent scaling', async () => {
     await coordinator.spawnAgent({ id: 'base-agent', type: 'coder', capabilities: ['code'] });
 

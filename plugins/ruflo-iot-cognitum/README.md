@@ -10,7 +10,7 @@ This plugin requires a **Cognitum Seed** device. Get one at **https://cognitum.o
 
 Treats every Cognitum Seed device as a Ruflo agent with hardware capabilities. Devices progress through a 5-tier trust model, emit telemetry vectors for anomaly detection, participate in mesh networks, and maintain Ed25519 witness chains for provenance.
 
-Backed by `@claude-flow/plugin-iot-cognitum` (239 tests, 32 source files).
+Backed by `@claude-flow/plugin-iot-cognitum` (239 tests, 39 source files).
 
 ## Installation
 
@@ -134,9 +134,45 @@ pending → canary → rolling → complete
 - **SONA Neural**: Anomaly patterns fed to SONA for cross-device correlation and predictive maintenance
 - **Cognitum SDK**: `@cognitum-one/sdk/seed` SeedClient with 12 typed endpoints
 
+## Compatibility
+
+- **CLI:** pinned to `@claude-flow/cli` v3.6 major+minor.
+- **Hardware:** requires Cognitum Seed device. SDK: `@cognitum-one/sdk/seed`.
+- **Verification:** `bash plugins/ruflo-iot-cognitum/scripts/smoke.sh` is the contract.
+
+## Namespace coordination
+
+This plugin owns five AgentDB namespaces, all compliant with the [ruflo-agentdb ADR-0001 §"Namespace convention"](../ruflo-agentdb/docs/adrs/0001-agentdb-optimization.md) (`<plugin-stem>-<intent>` kebab-case):
+
+| Namespace | Purpose |
+|-----------|---------|
+| `iot-devices` | Device trust history per Cognitum Seed |
+| `iot-telemetry` | Telemetry vectors (HNSW: M=16, efConstruction=200) |
+| `iot-telemetry-anomalies` | Detected anomalies tagged by type + remedial action |
+| `iot-anomalies` | Skill-level anomaly index (alias of above) |
+| `iot-audit` | Witness-chain gap records |
+
+Reserved namespaces (`pattern`, `claude-memories`, `default`) MUST NOT be shadowed.
+
+## Trust model parallel with federation
+
+This plugin's 5-tier device trust model (UNKNOWN → REGISTERED → PROVISIONED → CERTIFIED → FLEET_TRUSTED) follows the same shape as the [ruflo-federation 5-tier trust model](../ruflo-federation/docs/adrs/0001-federation-contract.md) (UNTRUSTED → VERIFIED → ATTESTED → TRUSTED → PRIVILEGED). Different surface (IoT devices vs federation peers) and distinct naming, but the score-driven progression and capability-gating principle are the same.
+
+## Verification
+
+```bash
+bash plugins/ruflo-iot-cognitum/scripts/smoke.sh
+# Expected: "12 passed, 0 failed"
+```
+
+## Architecture Decisions
+
+- [`ADR-0001` — ruflo-iot-cognitum plugin contract (compliant namespaces, 5-tier trust parallel, 6 background workers, smoke as contract)](./docs/adrs/0001-iot-cognitum-contract.md)
+
 ## Related Plugins
 
-- `ruflo-agentdb` — HNSW-indexed telemetry storage backend
+- `ruflo-agentdb` — HNSW-indexed telemetry storage backend; namespace convention owner
+- `ruflo-federation` — 5-tier trust model parallel (different surface, distinct naming, same shape)
 - `ruflo-intelligence` — SONA neural pattern learning
 - `ruflo-observability` — Telemetry correlation and tracing
 

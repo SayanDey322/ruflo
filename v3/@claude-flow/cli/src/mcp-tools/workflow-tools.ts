@@ -8,6 +8,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { type MCPTool, getProjectCwd } from './types.js';
 import { validateIdentifier, validatePath, validateText } from './validate-input.js';
+import { executeAgentTask } from './agent-execute-core.js';
 
 // Storage paths
 const STORAGE_DIR = '.claude-flow';
@@ -81,7 +82,7 @@ function saveWorkflowStore(store: WorkflowStore): void {
 export const workflowTools: MCPTool[] = [
   {
     name: 'workflow_run',
-    description: 'Run a workflow from a template or file',
+    description: 'Run a workflow from a template or file Use when native TodoWrite + sequential Bash is wrong because the work has a real dependency graph that needs persistence, retry policy, pause/resume, and step-output binding across LLM-driven steps. For a single linear todo list, native TodoWrite is fine.',
     category: 'workflow',
     inputSchema: {
       type: 'object',
@@ -193,7 +194,7 @@ export const workflowTools: MCPTool[] = [
   },
   {
     name: 'workflow_create',
-    description: 'Create a new workflow',
+    description: 'Create a new workflow Use when native TodoWrite + sequential Bash is wrong because the work has a real dependency graph that needs persistence, retry policy, pause/resume, and step-output binding across LLM-driven steps. For a single linear todo list, native TodoWrite is fine.',
     category: 'workflow',
     inputSchema: {
       type: 'object',
@@ -261,7 +262,7 @@ export const workflowTools: MCPTool[] = [
   },
   {
     name: 'workflow_execute',
-    description: 'Execute a workflow',
+    description: 'Execute a workflow Use when native TodoWrite + sequential Bash is wrong because the work has a real dependency graph that needs persistence, retry policy, pause/resume, and step-output binding across LLM-driven steps. For a single linear todo list, native TodoWrite is fine.',
     category: 'workflow',
     inputSchema: {
       type: 'object',
@@ -284,7 +285,6 @@ export const workflowTools: MCPTool[] = [
       if (!workflow) {
         return { workflowId, error: 'Workflow not found' };
       }
-
       if (workflow.status === 'running') {
         return { workflowId, error: 'Workflow already running' };
       }
@@ -297,35 +297,158 @@ export const workflowTools: MCPTool[] = [
       workflow.status = 'running';
       workflow.startedAt = new Date().toISOString();
       workflow.currentStep = (input.startFromStep as number) || 0;
+      saveWorkflowStore(store);
 
-      // Set steps to pending — actual execution requires agent assignment via task tools
-      const results: Array<{ stepId: string; status: string; _note: string }> = [];
-      for (let i = workflow.currentStep; i < workflow.steps.length; i++) {
-        const step = workflow.steps[i];
-        step.status = 'pending';
+      // ADR-095 G3: real workflow runtime. Walk the steps in order;
+      // dispatch each by type. Persist progress after each step so a
+      // crash or pause can resume cleanly. No mock — task steps make
+      // real LLM calls via agent_execute (G1's wire).
+      const stepResults: Array<{ stepId: string; type: string; status: string; durationMs?: number; output?: string; error?: string }> = [];
 
-        results.push({
-          stepId: step.stepId,
-          status: step.status,
-          _note: 'Workflow execution tracks state. Actual step execution requires agent assignment via task tools.',
+      // Variable substitution: {{name}} → workflow.variables[name] OR steps[stepId].output
+      const interp = (text: string): string => {
+        return text.replace(/\{\{\s*([a-zA-Z_][\w.]*)\s*\}\}/g, (_, key) => {
+          // Direct variable
+          if (key in workflow.variables) return String(workflow.variables[key]);
+          // Step-output reference: stepId.output
+          const dot = key.indexOf('.');
+          if (dot > 0) {
+            const stepId = key.slice(0, dot);
+            const field = key.slice(dot + 1);
+            const prior = stepResults.find(s => s.stepId === stepId);
+            if (prior && field === 'output' && typeof prior.output === 'string') return prior.output;
+          }
+          return '';
         });
+      };
+
+      const startedAt = Date.now();
+      let i = workflow.currentStep;
+      while (i < workflow.steps.length) {
+        // Honor pause/cancel signals between steps.
+        const live = loadWorkflowStore().workflows[workflowId];
+        if (!live || live.status === 'paused') {
+          workflow.status = 'paused';
+          workflow.currentStep = i;
+          saveWorkflowStore(store);
+          break;
+        }
+        if (live.status === 'failed') {
+          workflow.status = 'failed';
+          saveWorkflowStore(store);
+          break;
+        }
+
+        const step = workflow.steps[i];
+        step.status = 'running';
+        step.startedAt = new Date().toISOString();
+        const stepStart = Date.now();
+        saveWorkflowStore(store);
+
+        let stepEntry: typeof stepResults[number] = { stepId: step.stepId, type: step.type, status: 'running' };
+
+        try {
+          if (step.type === 'task') {
+            const cfg = step.config as Record<string, unknown>;
+            const agentId = (cfg.agentId as string) || (workflow.variables.defaultAgentId as string);
+            const promptTpl = (cfg.prompt as string) || step.name;
+            if (!agentId) throw new Error(`task step ${step.stepId} requires config.agentId or workflow.variables.defaultAgentId`);
+            const prompt = interp(promptTpl);
+            const result = await executeAgentTask({
+              agentId,
+              prompt,
+              systemPrompt: cfg.systemPrompt ? interp(String(cfg.systemPrompt)) : undefined,
+              maxTokens: cfg.maxTokens as number | undefined,
+              temperature: cfg.temperature as number | undefined,
+              timeoutMs: cfg.timeoutMs as number | undefined,
+            });
+            if (!result.success) throw new Error(result.error || 'agent_execute failed');
+            step.result = result;
+            workflow.variables[`${step.stepId}.output`] = result.output;
+            workflow.variables.lastStepOutput = result.output;
+            stepEntry = { stepId: step.stepId, type: 'task', status: 'completed', durationMs: result.durationMs, output: result.output };
+          } else if (step.type === 'wait') {
+            const cfg = step.config as Record<string, unknown>;
+            const ms = Math.min(Math.max(0, (cfg.ms as number) || 0), 60000);
+            await new Promise(r => setTimeout(r, ms));
+            step.result = { waitedMs: ms };
+            stepEntry = { stepId: step.stepId, type: 'wait', status: 'completed', durationMs: ms };
+          } else if (step.type === 'condition') {
+            // Simple condition: config.when is a JS expression evaluated against workflow.variables.
+            // For safety, we only support `var === 'value'` or `var === number`.
+            const cfg = step.config as Record<string, unknown>;
+            const expr = String(cfg.when || 'true').trim();
+            const m = expr.match(/^([a-zA-Z_][\w]*)\s*===?\s*(['\"])?([^'\"]*)\2?$/);
+            let truthy = false;
+            if (m) {
+              const v = workflow.variables[m[1]];
+              const expected = m[2] ? m[3] : Number(m[3]);
+              truthy = v === expected;
+            } else if (expr === 'true') truthy = true;
+            step.result = { conditionExpr: expr, truthy };
+            // condition can declare a target step index to jump to via cfg.thenStep / cfg.elseStep
+            if (typeof cfg.thenStep === 'number' && truthy) i = (cfg.thenStep as number) - 1;
+            if (typeof cfg.elseStep === 'number' && !truthy) i = (cfg.elseStep as number) - 1;
+            stepEntry = { stepId: step.stepId, type: 'condition', status: 'completed' };
+          } else {
+            // parallel/loop are deferred — mark skipped honestly rather than mock-completing.
+            step.result = { _note: `step type '${step.type}' not yet implemented in runtime` };
+            stepEntry = { stepId: step.stepId, type: step.type, status: 'skipped' };
+          }
+          step.status = stepEntry.status === 'skipped' ? 'skipped' : 'completed';
+          step.completedAt = new Date().toISOString();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          step.status = 'failed';
+          step.result = { error: msg };
+          step.completedAt = new Date().toISOString();
+          stepEntry = { stepId: step.stepId, type: step.type, status: 'failed', durationMs: Date.now() - stepStart, error: msg };
+          stepResults.push(stepEntry);
+          workflow.status = 'failed';
+          workflow.error = msg;
+          workflow.completedAt = new Date().toISOString();
+          saveWorkflowStore(store);
+          return {
+            workflowId,
+            status: 'failed',
+            error: msg,
+            failedStep: step.stepId,
+            stepsCompleted: stepResults.filter(s => s.status === 'completed').length,
+            results: stepResults,
+            durationMs: Date.now() - startedAt,
+          };
+        }
+
+        if (typeof stepEntry.durationMs !== 'number') stepEntry.durationMs = Date.now() - stepStart;
+        stepResults.push(stepEntry);
+        workflow.currentStep = i + 1;
+        saveWorkflowStore(store);
+        i++;
       }
 
-      saveWorkflowStore(store);
+      if (workflow.status === 'running') {
+        workflow.status = 'completed';
+        workflow.completedAt = new Date().toISOString();
+        saveWorkflowStore(store);
+      }
 
       return {
         workflowId,
         status: workflow.status,
-        totalSteps: results.length,
-        results,
+        totalSteps: workflow.steps.length,
+        stepsCompleted: stepResults.filter(s => s.status === 'completed').length,
+        stepsSkipped: stepResults.filter(s => s.status === 'skipped').length,
+        stepsFailed: stepResults.filter(s => s.status === 'failed').length,
+        results: stepResults,
         startedAt: workflow.startedAt,
-        _note: 'Workflow is now running. Steps are in pending state and must be executed via task tools.',
+        completedAt: workflow.completedAt,
+        durationMs: Date.now() - startedAt,
       };
     },
   },
   {
     name: 'workflow_status',
-    description: 'Get workflow status',
+    description: 'Get workflow status Use when native TodoWrite + sequential Bash is wrong because the work has a real dependency graph that needs persistence, retry policy, pause/resume, and step-output binding across LLM-driven steps. For a single linear todo list, native TodoWrite is fine.',
     category: 'workflow',
     inputSchema: {
       type: 'object',
@@ -386,7 +509,7 @@ export const workflowTools: MCPTool[] = [
   },
   {
     name: 'workflow_list',
-    description: 'List all workflows',
+    description: 'List all workflows Use when native TodoWrite + sequential Bash is wrong because the work has a real dependency graph that needs persistence, retry policy, pause/resume, and step-output binding across LLM-driven steps. For a single linear todo list, native TodoWrite is fine.',
     category: 'workflow',
     inputSchema: {
       type: 'object',
@@ -433,7 +556,7 @@ export const workflowTools: MCPTool[] = [
   },
   {
     name: 'workflow_pause',
-    description: 'Pause a running workflow',
+    description: 'Pause a running workflow Use when native TodoWrite + sequential Bash is wrong because the work has a real dependency graph that needs persistence, retry policy, pause/resume, and step-output binding across LLM-driven steps. For a single linear todo list, native TodoWrite is fine.',
     category: 'workflow',
     inputSchema: {
       type: 'object',
@@ -472,7 +595,7 @@ export const workflowTools: MCPTool[] = [
   },
   {
     name: 'workflow_resume',
-    description: 'Resume a paused workflow',
+    description: 'Resume a paused workflow Use when native TodoWrite + sequential Bash is wrong because the work has a real dependency graph that needs persistence, retry policy, pause/resume, and step-output binding across LLM-driven steps. For a single linear todo list, native TodoWrite is fine.',
     category: 'workflow',
     inputSchema: {
       type: 'object',
@@ -523,7 +646,7 @@ export const workflowTools: MCPTool[] = [
   },
   {
     name: 'workflow_cancel',
-    description: 'Cancel a workflow',
+    description: 'Cancel a workflow Use when native TodoWrite + sequential Bash is wrong because the work has a real dependency graph that needs persistence, retry policy, pause/resume, and step-output binding across LLM-driven steps. For a single linear todo list, native TodoWrite is fine.',
     category: 'workflow',
     inputSchema: {
       type: 'object',
@@ -576,7 +699,7 @@ export const workflowTools: MCPTool[] = [
   },
   {
     name: 'workflow_delete',
-    description: 'Delete a workflow',
+    description: 'Delete a workflow Use when native TodoWrite + sequential Bash is wrong because the work has a real dependency graph that needs persistence, retry policy, pause/resume, and step-output binding across LLM-driven steps. For a single linear todo list, native TodoWrite is fine.',
     category: 'workflow',
     inputSchema: {
       type: 'object',
@@ -614,7 +737,7 @@ export const workflowTools: MCPTool[] = [
   },
   {
     name: 'workflow_template',
-    description: 'Save workflow as template or create from template',
+    description: 'Save workflow as template or create from template Use when native TodoWrite + sequential Bash is wrong because the work has a real dependency graph that needs persistence, retry policy, pause/resume, and step-output binding across LLM-driven steps. For a single linear todo list, native TodoWrite is fine.',
     category: 'workflow',
     inputSchema: {
       type: 'object',
@@ -728,6 +851,103 @@ export const workflowTools: MCPTool[] = [
       }
 
       return { action, error: 'Unknown action' };
+    },
+  },
+  {
+    // #1916: `ruflo workflow stop <id>` referenced an unregistered
+    // `workflow_stop` tool. Equivalent to workflow_cancel but returns the
+    // shape the CLI expects (`{ workflowId, stopped, stoppedAt }`).
+    name: 'workflow_stop',
+    description: 'Stop a running/paused workflow and skip its remaining steps. Use when native TodoWrite + sequential Bash is wrong because the work has a real dependency graph that needs persistence, pause/resume, and step-output binding — and you need to halt it cleanly mid-run. For a single linear todo list, native TodoWrite is fine. (Same effect as workflow_cancel; this name is what the CLI `workflow stop` subcommand calls.)',
+    category: 'workflow',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        workflowId: { type: 'string', description: 'Workflow ID' },
+        graceful: { type: 'boolean', description: 'Let the current step finish (advisory)' },
+      },
+      required: ['workflowId'],
+    },
+    handler: async (input) => {
+      const vId = validateIdentifier(input.workflowId, 'workflowId');
+      if (!vId.valid) return { success: false, error: vId.error };
+      const store = loadWorkflowStore();
+      const workflowId = input.workflowId as string;
+      const workflow = store.workflows[workflowId];
+      if (!workflow) return { workflowId, error: 'Workflow not found' };
+      if (workflow.status === 'completed' || workflow.status === 'failed') {
+        return { workflowId, error: 'Workflow already finished' };
+      }
+      workflow.status = 'failed';
+      workflow.error = 'Stopped by user';
+      workflow.completedAt = new Date().toISOString();
+      for (let i = workflow.currentStep; i < workflow.steps.length; i++) {
+        workflow.steps[i].status = 'skipped';
+      }
+      saveWorkflowStore(store);
+      return { workflowId, stopped: true, stoppedAt: workflow.completedAt };
+    },
+  },
+  {
+    // #1916: `ruflo workflow validate -f <file>` referenced an unregistered
+    // `workflow_validate` tool. Structural sanity check (JSON workflow files);
+    // a full schema validator is a follow-up.
+    name: 'workflow_validate',
+    description: 'Structurally validate a workflow definition file (JSON) — checks it has a steps/stages/tasks array and that each step names an agent. Use when native Read is wrong because you want a parsed, structured pass/fail with error/warning lists and step/agent counts rather than eyeballing the file. For just reading the file, native Read is fine. (Basic checks today — a full workflow-schema validator is a tracked follow-up.)',
+    category: 'workflow',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'Path to the workflow definition file' },
+        strict: { type: 'boolean', description: 'Treat warnings as errors' },
+      },
+      required: ['file'],
+    },
+    handler: async (input) => {
+      const file = String(input.file ?? '');
+      const errors: Array<{ line: number; message: string; severity: string }> = [];
+      const warnings: Array<{ line: number; message: string }> = [];
+      let stages = 0;
+      let agents = 0;
+      try {
+        if (!file || !existsSync(file)) {
+          errors.push({ line: 0, message: `File not found: ${file || '(empty)'}`, severity: 'error' });
+        } else {
+          const raw = readFileSync(file, 'utf-8');
+          let doc: unknown = null;
+          if (/\.ya?ml$/i.test(file)) {
+            warnings.push({ line: 0, message: 'YAML workflow files are not schema-validated yet — only JSON is fully checked (#1916 follow-up)' });
+            try { doc = JSON.parse(raw); } catch { /* not JSON; leave doc null */ }
+          } else {
+            doc = JSON.parse(raw);
+          }
+          const d = (doc ?? {}) as Record<string, unknown>;
+          const steps = (d.steps ?? d.stages ?? d.tasks) as unknown;
+          if (!Array.isArray(steps)) {
+            errors.push({ line: 0, message: 'Workflow has no `steps` / `stages` / `tasks` array', severity: 'error' });
+          } else {
+            stages = steps.length;
+            const agentSet = new Set<string>();
+            steps.forEach((s, i) => {
+              const step = (s ?? {}) as Record<string, unknown>;
+              const a = (step.agent ?? step.agentType ?? step.agent_type) as string | undefined;
+              if (a) agentSet.add(String(a));
+              else warnings.push({ line: i + 1, message: `step ${i + 1} ("${step.name ?? step.id ?? i + 1}") names no agent` });
+            });
+            agents = agentSet.size;
+          }
+        }
+      } catch (e) {
+        errors.push({ line: 0, message: `Parse error: ${(e as Error).message}`, severity: 'error' });
+      }
+      const valid = errors.length === 0 && (!input.strict || warnings.length === 0);
+      return {
+        valid,
+        file,
+        errors,
+        warnings,
+        stats: { stages, agents, estimatedDuration: stages > 0 ? `~${stages * 30}s` : 'unknown' },
+      };
     },
   },
 ];

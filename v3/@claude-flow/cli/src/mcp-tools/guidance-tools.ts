@@ -10,44 +10,72 @@
 import { type MCPTool, getProjectCwd } from './types.js';
 import { validateIdentifier, validateText } from './validate-input.js';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  buildCapabilityBrain,
+  recommendCapabilities,
+  type CapabilityToolMetadata,
+} from './capability-brain.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const CLI_ROOT = join(__dirname, '../../..');
-
 /**
  * Find the project root by looking for .claude/ directory.
  * Tries CWD first (most common), then walks up from the CLI package location.
  */
 function findProjectRoot(): string {
-  // Strategy 1: CWD (most reliable when invoked by user)
-  if (existsSync(join(getProjectCwd(), '.claude'))) {
-    return getProjectCwd();
+  const cwd = getProjectCwd();
+  let cwdIsCliPackage = false;
+  const cwdManifest = join(cwd, 'package.json');
+  if (existsSync(cwdManifest)) {
+    try {
+      const manifest = JSON.parse(readFileSync(cwdManifest, 'utf-8')) as { name?: string };
+      cwdIsCliPackage = manifest.name === '@claude-flow/cli';
+    } catch {
+      // An invalid project manifest is not a reason to hide discoverable files.
+    }
   }
 
-  // Strategy 2: Walk up from CLI package location
-  // CLI is at v3/@claude-flow/cli/ — project root is 4 levels up
-  const fromPackage = join(CLI_ROOT, '../../../..');
-  if (existsSync(join(fromPackage, '.claude'))) {
-    return fromPackage;
+  // User projects with a local .claude directory remain the primary root.
+  // Exclude the CLI package's own shipped .claude assets during repository
+  // development; otherwise ecosystem discovery silently stops at the package.
+  if (!cwdIsCliPackage && existsSync(join(cwd, '.claude'))) {
+    return cwd;
   }
 
-  // Strategy 3: Walk up from CWD
-  let dir = getProjectCwd();
+  // Walk up to a Git/workspace root. Worktrees use a .git file, so existsSync
+  // is intentionally used instead of requiring a directory.
+  let dir = cwd;
   for (let i = 0; i < 10; i++) {
-    if (existsSync(join(dir, '.claude'))) return dir;
+    if (existsSync(join(dir, '.git'))) return dir;
+    if (!(cwdIsCliPackage && dir === cwd) && existsSync(join(dir, '.claude'))) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
 
   // Fallback: CWD
-  return getProjectCwd();
+  return cwd;
 }
 
 const PROJECT_ROOT = findProjectRoot();
+
+/**
+ * Injected by mcp-client after every MCP tool has been registered. Keeping the
+ * provider here avoids guidance importing the registry and creating a cycle.
+ */
+let liveToolProvider: () => readonly CapabilityToolMetadata[] = () => [];
+
+export function configureGuidanceToolProvider(
+  provider: () => readonly CapabilityToolMetadata[],
+): void {
+  liveToolProvider = provider;
+}
+
+function getCapabilityBrain() {
+  return buildCapabilityBrain(liveToolProvider());
+}
 
 // ── Capability Catalog ──────────────────────────────────────
 
@@ -64,7 +92,7 @@ interface CapabilityArea {
 const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   'agent-management': {
     name: 'Agent Management',
-    description: 'Spawn, manage, and monitor individual AI agents with lifecycle control.',
+    description: 'Spawn, manage, and monitor individual AI agents with lifecycle control. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: ['agent_spawn', 'agent_list', 'agent_status', 'agent_stop', 'agent_metrics', 'agent_pool', 'agent_health', 'agent_logs'],
     commands: ['agent spawn', 'agent list', 'agent status', 'agent stop', 'agent metrics', 'agent pool', 'agent health', 'agent logs'],
     agents: ['coder', 'tester', 'reviewer', 'researcher', 'planner'],
@@ -73,7 +101,7 @@ const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   'swarm-orchestration': {
     name: 'Swarm Orchestration',
-    description: 'Multi-agent coordination with topology-aware communication and consensus.',
+    description: 'Multi-agent coordination with topology-aware communication and consensus. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: ['swarm_init', 'swarm_status', 'swarm_spawn', 'swarm_terminate', 'swarm_topology', 'swarm_metrics'],
     commands: ['swarm init', 'swarm status', 'swarm spawn', 'swarm terminate'],
     agents: ['hierarchical-coordinator', 'mesh-coordinator', 'adaptive-coordinator', 'queen-coordinator', 'collective-intelligence-coordinator'],
@@ -82,7 +110,7 @@ const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   'memory-knowledge': {
     name: 'Memory & Knowledge',
-    description: 'Persistent memory with HNSW vector search, AgentDB storage, and embeddings.',
+    description: 'Persistent memory with HNSW vector search, AgentDB storage, and embeddings. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: ['memory_store', 'memory_retrieve', 'memory_search', 'memory_list', 'memory_delete', 'memory_init', 'memory_export', 'memory_import_claude', 'memory_stats', 'memory_compact', 'memory_namespace'],
     commands: ['memory store', 'memory retrieve', 'memory search', 'memory list', 'memory delete', 'memory init'],
     agents: ['swarm-memory-manager', 'v3-memory-specialist'],
@@ -91,7 +119,7 @@ const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   'intelligence-learning': {
     name: 'Intelligence & Learning',
-    description: 'Neural pattern training (SONA), RL loops, Flash Attention, EWC++ consolidation.',
+    description: 'Neural pattern training (SONA), RL loops, Flash Attention, EWC++ consolidation. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: ['neural_train', 'neural_predict', 'neural_status', 'neural_patterns', 'neural_optimize'],
     commands: ['neural train', 'neural predict', 'neural status', 'neural patterns', 'neural optimize'],
     agents: ['sona-learning-optimizer', 'safla-neural'],
@@ -100,7 +128,7 @@ const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   'hooks-automation': {
     name: 'Hooks & Automation',
-    description: '17 lifecycle hooks + 12 background workers for automated learning and coordination.',
+    description: '17 lifecycle hooks + 12 background workers for automated learning and coordination. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: ['hooks_pre_task', 'hooks_post_task', 'hooks_pre_edit', 'hooks_post_edit', 'hooks_route', 'hooks_explain'],
     commands: [
       'hooks pre-task', 'hooks post-task', 'hooks pre-edit', 'hooks post-edit',
@@ -115,7 +143,7 @@ const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   'hive-mind': {
     name: 'Hive Mind Consensus',
-    description: 'Queen-led Byzantine fault-tolerant distributed consensus with multiple strategies.',
+    description: 'Queen-led Byzantine fault-tolerant distributed consensus with multiple strategies. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: ['hive_mind_init', 'hive_mind_status', 'hive_mind_propose', 'hive_mind_vote', 'hive_mind_consensus', 'hive_mind_metrics'],
     commands: ['hive-mind init', 'hive-mind status', 'hive-mind consensus', 'hive-mind sessions', 'hive-mind spawn', 'hive-mind stop'],
     agents: ['byzantine-coordinator', 'raft-manager', 'gossip-coordinator', 'crdt-synchronizer', 'quorum-manager'],
@@ -124,7 +152,7 @@ const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   'security': {
     name: 'Security & Compliance',
-    description: 'Security scanning, CVE remediation, input validation, claims-based authorization.',
+    description: 'Security scanning, CVE remediation, input validation, claims-based authorization. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: ['security_scan', 'security_audit', 'security_cve', 'security_threats', 'security_validate', 'security_report', 'claims_check', 'claims_grant', 'claims_revoke', 'claims_list'],
     commands: ['security scan', 'security audit', 'security cve', 'security threats', 'claims check', 'claims grant'],
     agents: ['v3-security-architect'],
@@ -133,7 +161,7 @@ const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   'performance': {
     name: 'Performance & Profiling',
-    description: 'Benchmarking, profiling, metrics collection, and optimization recommendations.',
+    description: 'Benchmarking, profiling, metrics collection, and optimization recommendations. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: ['performance_benchmark', 'performance_profile', 'performance_metrics', 'performance_optimize', 'performance_report'],
     commands: ['performance benchmark', 'performance profile', 'performance metrics', 'performance optimize', 'performance report'],
     agents: ['v3-performance-engineer'],
@@ -142,7 +170,7 @@ const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   'github-integration': {
     name: 'GitHub Integration',
-    description: 'PR management, code review, issue tracking, release automation, multi-repo coordination.',
+    description: 'PR management, code review, issue tracking, release automation, multi-repo coordination. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: ['github_pr_manage', 'github_code_review', 'github_issue_track', 'github_repo_analyze', 'github_sync_coord', 'github_metrics'],
     commands: [],
     agents: ['pr-manager', 'code-review-swarm', 'issue-tracker', 'release-manager', 'repo-architect', 'workflow-automation', 'multi-repo-swarm', 'project-board-sync', 'swarm-pr', 'swarm-issue', 'sync-coordinator', 'github-modes', 'release-swarm'],
@@ -151,7 +179,7 @@ const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   'session-workflow': {
     name: 'Session & Workflow',
-    description: 'Session state management, workflow execution, task lifecycle, and daemon scheduling.',
+    description: 'Session state management, workflow execution, task lifecycle, and daemon scheduling. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: ['session_start', 'session_end', 'session_restore', 'session_list', 'workflow_execute', 'workflow_create', 'task_create', 'task_assign', 'task_status'],
     commands: ['session start', 'session end', 'session restore', 'workflow execute', 'workflow create', 'task create', 'daemon start', 'daemon stop'],
     agents: [],
@@ -160,7 +188,7 @@ const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   'embeddings-vectors': {
     name: 'Embeddings & Vector Search',
-    description: 'Vector embeddings with sql.js, HNSW indexing, hyperbolic embeddings, ONNX integration.',
+    description: 'Vector embeddings with sql.js, HNSW indexing, hyperbolic embeddings, ONNX integration. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: ['embeddings_embed', 'embeddings_batch', 'embeddings_search', 'embeddings_init'],
     commands: ['embeddings embed', 'embeddings batch', 'embeddings search', 'embeddings init'],
     agents: [],
@@ -169,7 +197,7 @@ const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   'wasm-agents': {
     name: 'WASM Sandboxed Agents',
-    description: 'Sandboxed AI agents running in WebAssembly with virtual filesystem, no OS access.',
+    description: 'Sandboxed AI agents running in WebAssembly with virtual filesystem, no OS access. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: ['wasm_agent_create', 'wasm_agent_prompt', 'wasm_agent_tool', 'wasm_agent_list', 'wasm_agent_terminate', 'wasm_agent_files', 'wasm_agent_export', 'wasm_gallery_list', 'wasm_gallery_search', 'wasm_gallery_create'],
     commands: [],
     agents: [],
@@ -178,7 +206,7 @@ const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   'ruvllm-inference': {
     name: 'RuVLLM Inference',
-    description: 'WASM-based HNSW routing, SONA instant adaptation, MicroLoRA, chat formatting.',
+    description: 'WASM-based HNSW routing, SONA instant adaptation, MicroLoRA, chat formatting. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: ['ruvllm_status', 'ruvllm_hnsw_create', 'ruvllm_sona_create', 'ruvllm_microlora_create', 'ruvllm_chat_format', 'ruvllm_kvcache_create'],
     commands: [],
     agents: [],
@@ -187,7 +215,7 @@ const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   'code-analysis': {
     name: 'Code Analysis & Diff',
-    description: 'AST analysis, diff classification, coverage routing, dependency graph analysis.',
+    description: 'AST analysis, diff classification, coverage routing, dependency graph analysis. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: ['analyze_diff', 'analyze_coverage', 'analyze_graph'],
     commands: [],
     agents: ['code-analyzer'],
@@ -196,7 +224,7 @@ const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   'sparc-methodology': {
     name: 'SPARC Methodology',
-    description: 'Specification, Pseudocode, Architecture, Refinement, Completion — structured development.',
+    description: 'Specification, Pseudocode, Architecture, Refinement, Completion — structured development. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: [],
     commands: [],
     agents: ['specification', 'pseudocode', 'architecture', 'refinement'],
@@ -205,7 +233,7 @@ const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   'config-system': {
     name: 'Configuration & System',
-    description: 'Configuration management, provider setup, system diagnostics, shell completions.',
+    description: 'Configuration management, provider setup, system diagnostics, shell completions. Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     tools: ['config_get', 'config_set', 'config_list', 'config_provider'],
     commands: ['config get', 'config set', 'config list', 'config provider', 'doctor', 'status', 'providers list', 'completions'],
     agents: [],
@@ -315,9 +343,6 @@ const WORKFLOW_TEMPLATES: Record<string, { steps: string[]; agents: string[]; to
 // ── Dynamic Discovery ───────────────────────────────────────
 
 function discoverAgents(): string[] {
-  const agentsDir = join(PROJECT_ROOT, '.claude/agents');
-  if (!existsSync(agentsDir)) return [];
-
   const agents: string[] = [];
   function walk(dir: string) {
     try {
@@ -333,34 +358,124 @@ function discoverAgents(): string[] {
       }
     } catch { /* ignore */ }
   }
-  walk(agentsDir);
+  const roots = [
+    join(PROJECT_ROOT, '.claude/agents'),
+    join(PROJECT_ROOT, '.agents/agents'),
+  ];
+  const pluginsDir = join(PROJECT_ROOT, 'plugins');
+  if (existsSync(pluginsDir)) {
+    for (const entry of readdirSync(pluginsDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) roots.push(join(pluginsDir, entry.name, 'agents'));
+    }
+  }
+  for (const root of roots) {
+    if (existsSync(root)) walk(root);
+  }
   return [...new Set(agents)].sort();
 }
 
 function discoverSkills(): string[] {
-  const skillsDir = join(PROJECT_ROOT, '.claude/skills');
-  if (!existsSync(skillsDir)) return [];
-
   const skills: string[] = [];
-  try {
-    const entries = readdirSync(skillsDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        const skillFile = join(skillsDir, entry.name, 'SKILL.md');
-        if (existsSync(skillFile)) {
-          skills.push(entry.name);
+  function walk(dir: string) {
+    try {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const target = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(target);
+        } else if (entry.name === 'SKILL.md') {
+          const content = readFileSync(target, 'utf-8');
+          const nameMatch = content.match(/^name:\s*(.+)$/m);
+          skills.push(
+            nameMatch
+              ? nameMatch[1]!.trim().replace(/^["']|["']$/g, '')
+              : relative(PROJECT_ROOT, dirname(target)),
+          );
         }
       }
+    } catch {
+      // Missing or unreadable optional capability roots are reported by absence.
     }
-  } catch { /* ignore */ }
-  return skills.sort();
+  }
+
+  const roots = [
+    join(PROJECT_ROOT, '.claude/skills'),
+    join(PROJECT_ROOT, '.agents/skills'),
+  ];
+  const pluginsDir = join(PROJECT_ROOT, 'plugins');
+  if (existsSync(pluginsDir)) {
+    for (const entry of readdirSync(pluginsDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) roots.push(join(pluginsDir, entry.name, 'skills'));
+    }
+  }
+  for (const root of roots) {
+    if (existsSync(root)) walk(root);
+  }
+  return [...new Set(skills)].sort();
+}
+
+function discoverPlugins(): Array<Record<string, unknown>> {
+  const pluginsDir = join(PROJECT_ROOT, 'plugins');
+  if (!existsSync(pluginsDir)) return [];
+  const plugins: Array<Record<string, unknown>> = [];
+  for (const entry of readdirSync(pluginsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const manifestPath = join(pluginsDir, entry.name, '.claude-plugin', 'plugin.json');
+    if (!existsSync(manifestPath)) continue;
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as Record<string, unknown>;
+      plugins.push({
+        id: entry.name,
+        name: manifest.name ?? entry.name,
+        version: manifest.version ?? 'unknown',
+        description: manifest.description ?? '',
+        manifest: relative(PROJECT_ROOT, manifestPath),
+      });
+    } catch {
+      plugins.push({
+        id: entry.name,
+        name: entry.name,
+        version: 'unknown',
+        manifest: relative(PROJECT_ROOT, manifestPath),
+        invalidManifest: true,
+      });
+    }
+  }
+  return plugins.sort((left, right) => String(left.id).localeCompare(String(right.id), 'en-US'));
+}
+
+function discoverPackages(): Array<Record<string, unknown>> {
+  const packagesDir = join(PROJECT_ROOT, 'v3', '@claude-flow');
+  if (!existsSync(packagesDir)) return [];
+  const packages: Array<Record<string, unknown>> = [];
+  for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const manifestPath = join(packagesDir, entry.name, 'package.json');
+    if (!existsSync(manifestPath)) continue;
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as Record<string, unknown>;
+      packages.push({
+        name: manifest.name ?? entry.name,
+        version: manifest.version ?? 'unknown',
+        description: manifest.description ?? '',
+        manifest: relative(PROJECT_ROOT, manifestPath),
+      });
+    } catch {
+      packages.push({
+        name: entry.name,
+        version: 'unknown',
+        manifest: relative(PROJECT_ROOT, manifestPath),
+        invalidManifest: true,
+      });
+    }
+  }
+  return packages.sort((left, right) => String(left.name).localeCompare(String(right.name), 'en-US'));
 }
 
 // ── MCP Tool Definitions ────────────────────────────────────
 
 const guidanceCapabilities: MCPTool = {
   name: 'guidance_capabilities',
-  description: 'List all capability areas with their tools, commands, agents, and skills. Use this to discover what Ruflo can do.',
+  description: 'List all capability areas with their tools, commands, agents, and skills. Use this to discover what Ruflo can do. Use when generic "what tool should I use?" guessing is wrong — Ruflo\'s guidance system uses the live tool index + your workflow context to recommend. Pair with hooks_route at task start. For trivial native-only tasks, no guidance call is needed.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -378,20 +493,49 @@ const guidanceCapabilities: MCPTool = {
   handler: async (params: Record<string, unknown>) => {
     const area = params.area as string | undefined;
     const format = (params.format as string) || 'summary';
+    const brain = getCapabilityBrain();
 
     if (area) { const v = validateIdentifier(area, 'area'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }, null, 2) }], isError: true }; }
 
     if (area) {
       const cap = CAPABILITY_CATALOG[area];
-      if (!cap) {
-        const available = Object.keys(CAPABILITY_CATALOG).join(', ');
+      const brainDomain = brain.domains.find((domain) => domain.id === area);
+      if (!cap && !brainDomain) {
+        const available = [
+          ...Object.keys(CAPABILITY_CATALOG),
+          ...brain.domains.map((domain) => domain.id),
+        ].filter((value, index, all) => all.indexOf(value) === index).join(', ');
         return { content: [{ type: 'text', text: JSON.stringify({ error: `Unknown area: ${area}`, available }, null, 2) }], isError: true };
       }
-      return { content: [{ type: 'text', text: JSON.stringify(cap, null, 2) }] };
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            ...(cap ?? {}),
+            legacyCatalogStatus: cap ? 'compatibility-only; tool names may be deprecated aliases' : undefined,
+            legacyToolResolution: cap ? cap.tools.map((name) => ({
+              name,
+              registered: brain.domains.some((entry) => entry.tools.some((tool) => tool.name === name)),
+            })) : undefined,
+            capabilityBrain: brainDomain,
+          }, null, 2),
+        }],
+      };
     }
 
     if (format === 'detailed') {
-      return { content: [{ type: 'text', text: JSON.stringify(CAPABILITY_CATALOG, null, 2) }] };
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            legacyCatalog: {
+              status: 'compatibility-only; use capabilityBrain for live routing',
+              areas: CAPABILITY_CATALOG,
+            },
+            capabilityBrain: brain,
+          }, null, 2),
+        }],
+      };
     }
 
     const summary = Object.entries(CAPABILITY_CATALOG).map(([key, val]) => ({
@@ -404,13 +548,36 @@ const guidanceCapabilities: MCPTool = {
       whenToUse: val.whenToUse,
     }));
 
-    return { content: [{ type: 'text', text: JSON.stringify({ areas: summary, totalAreas: summary.length }, null, 2) }] };
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          areas: summary,
+          totalAreas: summary.length,
+          live: {
+            schemaVersion: brain.schemaVersion,
+            registeredToolCount: brain.coverage.registeredToolCount,
+            classifiedToolCount: brain.coverage.classifiedToolCount,
+            coveragePercent: brain.coverage.coveragePercent,
+            fallbackClassifiedTools: brain.coverage.fallbackClassifiedTools,
+            domains: brain.domains.map((domain) => ({
+              id: domain.id,
+              name: domain.name,
+              registeredToolCount: domain.tools.length,
+              health: domain.health,
+              authority: domain.authority,
+              risk: domain.risk,
+            })),
+          },
+        }, null, 2),
+      }],
+    };
   },
 };
 
 const guidanceRecommend: MCPTool = {
   name: 'guidance_recommend',
-  description: 'Given a task description, recommend which capability areas, tools, agents, and workflow to use.',
+  description: 'Given a task description, recommend which capability areas, tools, agents, and workflow to use. Use when generic "what tool should I use?" guessing is wrong — Ruflo\'s guidance system uses the live tool index + your workflow context to recommend. Pair with hooks_route at task start. For trivial native-only tasks, no guidance call is needed.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -425,6 +592,8 @@ const guidanceRecommend: MCPTool = {
     const task = params.task as string;
 
     { const v = validateText(task, 'task'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }, null, 2) }], isError: true }; }
+    const brain = getCapabilityBrain();
+    const capabilityRecommendation = recommendCapabilities(brain, task);
 
     const matches: Array<{ area: string; capability: CapabilityArea; workflow: string; score: number }> = [];
 
@@ -463,6 +632,7 @@ const guidanceRecommend: MCPTool = {
               { area: 'hooks-automation', reason: 'Use hooks for task routing and learning' },
             ],
             tip: 'Use guidance_capabilities for a full list of all capability areas.',
+            capabilityBrain: capabilityRecommendation,
           }, null, 2),
         }],
       };
@@ -470,6 +640,9 @@ const guidanceRecommend: MCPTool = {
 
     const primaryWorkflow = recommendations[0]?.workflow;
     const template = primaryWorkflow ? WORKFLOW_TEMPLATES[primaryWorkflow] : undefined;
+    const liveToolNames = new Set(
+      brain.domains.flatMap((domain) => domain.tools.map((tool) => tool.name)),
+    );
 
     return {
       content: [{
@@ -480,7 +653,8 @@ const guidanceRecommend: MCPTool = {
             area: r.area,
             name: r.capability.name,
             description: r.capability.description,
-            tools: r.capability.tools,
+            tools: r.capability.tools.filter((name) => liveToolNames.has(name)),
+            unregisteredLegacyToolRefs: r.capability.tools.filter((name) => !liveToolNames.has(name)),
             agents: r.capability.agents,
             skills: r.capability.skills,
           })),
@@ -490,6 +664,7 @@ const guidanceRecommend: MCPTool = {
             agents: template.agents,
             topology: template.topology,
           } : undefined,
+          capabilityBrain: capabilityRecommendation,
         }, null, 2),
       }],
     };
@@ -498,13 +673,13 @@ const guidanceRecommend: MCPTool = {
 
 const guidanceDiscover: MCPTool = {
   name: 'guidance_discover',
-  description: 'Discover all available agents and skills from the .claude/ directory. Returns live filesystem data.',
+  description: 'Discover all available agents and skills from the .claude/ directory. Returns live filesystem data. Use when generic "what tool should I use?" guessing is wrong — Ruflo\'s guidance system uses the live tool index + your workflow context to recommend. Pair with hooks_route at task start. For trivial native-only tasks, no guidance call is needed.',
   inputSchema: {
     type: 'object',
     properties: {
       type: {
         type: 'string',
-        enum: ['agents', 'skills', 'all'],
+        enum: ['agents', 'skills', 'plugins', 'packages', 'all'],
         description: 'What to discover. Default: all.',
       },
     },
@@ -524,13 +699,28 @@ const guidanceDiscover: MCPTool = {
       result.skills = { count: skills.length, names: skills };
     }
 
+    if (type === 'plugins' || type === 'all') {
+      const plugins = discoverPlugins();
+      result.plugins = { count: plugins.length, entries: plugins };
+    }
+
+    if (type === 'packages' || type === 'all') {
+      const packages = discoverPackages();
+      result.packages = { count: packages.length, entries: packages };
+    }
+
+    result.capabilityBrain = {
+      registeredTools: getCapabilityBrain().coverage.registeredToolCount,
+      note: 'Filesystem discovery reports installed artifacts; it does not prove configuration, health, or authorization.',
+    };
+
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   },
 };
 
 const guidanceWorkflow: MCPTool = {
   name: 'guidance_workflow',
-  description: 'Get a recommended workflow template for a task type. Includes steps, agents, and topology.',
+  description: 'Get a recommended workflow template for a task type. Includes steps, agents, and topology. Use when generic "what tool should I use?" guessing is wrong — Ruflo\'s guidance system uses the live tool index + your workflow context to recommend. Pair with hooks_route at task start. For trivial native-only tasks, no guidance call is needed.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -582,7 +772,7 @@ const guidanceWorkflow: MCPTool = {
 
 const guidanceQuickRef: MCPTool = {
   name: 'guidance_quickref',
-  description: 'Quick reference card for common operations. Returns the most useful commands for a given domain.',
+  description: 'Quick reference card for common operations. Returns the most useful commands for a given domain. Use when generic "what tool should I use?" guessing is wrong — Ruflo\'s guidance system uses the live tool index + your workflow context to recommend. Pair with hooks_route at task start. For trivial native-only tasks, no guidance call is needed.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -668,10 +858,159 @@ const guidanceQuickRef: MCPTool = {
   },
 };
 
+const guidanceBrain: MCPTool = {
+  name: 'guidance_brain',
+  description: 'Use when choosing how to execute a task with Ruflo. Queries the live capability brain, covers every registered MCP tool, separates registration from configuration/reachability/health/authorization, recommends capabilities, and returns the validated implementation loop.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      mode: {
+        type: 'string',
+        enum: ['overview', 'capabilities', 'coverage', 'ecosystem', 'recommend', 'implementation-loop'],
+        description: 'Brain view. Default: overview.',
+      },
+      task: {
+        type: 'string',
+        description: 'Required for recommend mode.',
+      },
+      domain: {
+        type: 'string',
+        description: 'Optional capability domain filter for capabilities mode.',
+      },
+    },
+  },
+  handler: async (params: Record<string, unknown>) => {
+    const mode = (params.mode as string | undefined) ?? 'overview';
+    const task = params.task as string | undefined;
+    const domain = params.domain as string | undefined;
+    const brain = getCapabilityBrain();
+
+    if (domain) {
+      const validation = validateIdentifier(domain, 'domain');
+      if (!validation.valid) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ error: validation.error }, null, 2) }],
+          isError: true,
+        };
+      }
+    }
+
+    let result: unknown;
+    switch (mode) {
+      case 'overview':
+        result = {
+          schemaVersion: brain.schemaVersion,
+          generatedAt: brain.generatedAt,
+          truthModel: brain.truthModel,
+          coverage: brain.coverage,
+          domainCount: brain.domains.length,
+          cliCommandCount: brain.cliCommands.length,
+          cliCommands: brain.cliCommands,
+          registeredDomains: brain.domains
+            .filter((entry) => entry.health.registered)
+            .map((entry) => ({
+              id: entry.id,
+              name: entry.name,
+              toolCount: entry.tools.length,
+              maturity: entry.maturity,
+              authority: entry.authority,
+              risk: entry.risk,
+              health: entry.health,
+            })),
+          implementationLoop: brain.implementationLoop.map((step) => step.id),
+        };
+        break;
+      case 'capabilities': {
+        const capabilities = domain
+          ? brain.domains.filter((entry) => entry.id === domain)
+          : brain.domains;
+        if (domain && capabilities.length === 0) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: `Unknown capability domain: ${domain}`,
+                available: brain.domains.map((entry) => entry.id),
+              }, null, 2),
+            }],
+            isError: true,
+          };
+        }
+        result = { schemaVersion: brain.schemaVersion, truthModel: brain.truthModel, capabilities };
+        break;
+      }
+      case 'coverage':
+        result = {
+          schemaVersion: brain.schemaVersion,
+          coverage: brain.coverage,
+          assignments: brain.domains.map((entry) => ({
+            domain: entry.id,
+            tools: entry.tools.map((tool) => tool.name),
+          })),
+        };
+        break;
+      case 'ecosystem': {
+        const agents = discoverAgents();
+        const skills = discoverSkills();
+        const plugins = discoverPlugins();
+        const packages = discoverPackages();
+        result = {
+          schemaVersion: brain.schemaVersion,
+          agents: { count: agents.length, names: agents },
+          skills: { count: skills.length, names: skills },
+          plugins: { count: plugins.length, entries: plugins },
+          packages: { count: packages.length, entries: packages },
+          cliCommands: { count: brain.cliCommands.length, names: brain.cliCommands },
+          availabilityNote: 'Installed or catalogued artifacts are not necessarily configured, reachable, healthy, or authorized.',
+        };
+        break;
+      }
+      case 'recommend': {
+        const validation = validateText(task, 'task');
+        if (!validation.valid) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ error: validation.error }, null, 2) }],
+            isError: true,
+          };
+        }
+        result = recommendCapabilities(brain, task!);
+        break;
+      }
+      case 'implementation-loop':
+        result = {
+          schemaVersion: brain.schemaVersion,
+          steps: brain.implementationLoop,
+          invariants: [
+            'Recall precedes implementation.',
+            'Testing and validation precede optimization.',
+            'Benchmarks compare a source-bound candidate with a source-bound baseline.',
+            'Learning and optimization cannot authorize promotion.',
+            'Publishing requires separate authorization and immutable artifact evidence.',
+          ],
+        };
+        break;
+      default:
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: `Unknown mode: ${mode}`,
+              available: ['overview', 'capabilities', 'coverage', 'ecosystem', 'recommend', 'implementation-loop'],
+            }, null, 2),
+          }],
+          isError: true,
+        };
+    }
+
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  },
+};
+
 /**
  * All guidance tools
  */
 export const guidanceTools: MCPTool[] = [
+  guidanceBrain,
   guidanceCapabilities,
   guidanceRecommend,
   guidanceDiscover,

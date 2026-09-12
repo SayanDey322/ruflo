@@ -13,7 +13,7 @@ import { validateText } from './validate-input.js';
 import {
   loadState, saveState, appendLog, loadLog, discoverTasks,
   isTerminal, tryLoadLearning,
-  validateNumber, validateTaskSources,
+  validateNumber, validateConfiguredTaskSources,
   VALID_TASK_SOURCES,
 } from '../autopilot-state.js';
 
@@ -25,7 +25,7 @@ function ok(data: unknown) {
 
 const autopilotStatus: MCPTool = {
   name: 'autopilot_status',
-  description: 'Get autopilot state including enabled status, iteration count, task progress, and learning metrics.',
+  description: 'Get autopilot state including enabled status, iteration count, task progress, and learning metrics. Use when running long-horizon goals that should resume automatically across sessions — Claude Code has no native autonomous-loop scheduler. Pair with autopilot_enable + a goal description, then let cron fires advance the work. For interactive single-task sessions, native Task is fine.',
   category: 'autopilot',
   inputSchema: { type: 'object', properties: {} },
   handler: async () => {
@@ -47,7 +47,7 @@ const autopilotStatus: MCPTool = {
 
 const autopilotEnable: MCPTool = {
   name: 'autopilot_enable',
-  description: 'Enable autopilot persistent completion. Agents will be re-engaged when tasks remain incomplete.',
+  description: 'Enable autopilot persistent completion. Agents will be re-engaged when tasks remain incomplete. Use when running long-horizon goals that should resume automatically across sessions — Claude Code has no native autonomous-loop scheduler. Pair with autopilot_enable + a goal description, then let cron fires advance the work. For interactive single-task sessions, native Task is fine.',
   category: 'autopilot',
   inputSchema: { type: 'object', properties: {} },
   handler: async () => {
@@ -63,7 +63,7 @@ const autopilotEnable: MCPTool = {
 
 const autopilotDisable: MCPTool = {
   name: 'autopilot_disable',
-  description: 'Disable autopilot. Agents will be allowed to stop even if tasks remain.',
+  description: 'Disable autopilot. Agents will be allowed to stop even if tasks remain. Use when running long-horizon goals that should resume automatically across sessions — Claude Code has no native autonomous-loop scheduler. Pair with autopilot_enable + a goal description, then let cron fires advance the work. For interactive single-task sessions, native Task is fine.',
   category: 'autopilot',
   inputSchema: { type: 'object', properties: {} },
   handler: async () => {
@@ -77,14 +77,19 @@ const autopilotDisable: MCPTool = {
 
 const autopilotConfig: MCPTool = {
   name: 'autopilot_config',
-  description: 'Configure autopilot limits: max iterations (1-1000), timeout in minutes (1-1440), and task sources.',
+  description: 'Configure autopilot limits: max iterations (1-1000), timeout in minutes (1-1440), and task sources. Use when running long-horizon goals that should resume automatically across sessions — Claude Code has no native autonomous-loop scheduler. Pair with autopilot_enable + a goal description, then let cron fires advance the work. For interactive single-task sessions, native Task is fine.',
   category: 'autopilot',
   inputSchema: {
     type: 'object',
     properties: {
       maxIterations: { type: 'number', description: 'Max re-engagement iterations (1-1000)' },
       timeoutMinutes: { type: 'number', description: 'Timeout in minutes (1-1440)' },
-      taskSources: { type: 'array', items: { type: 'string' }, description: `Task sources: ${[...VALID_TASK_SOURCES].join(', ')}` },
+      taskSources: {
+        type: 'array',
+        minItems: 1,
+        items: { type: 'string', enum: [...VALID_TASK_SOURCES] },
+        description: `Task sources: ${[...VALID_TASK_SOURCES].join(', ')}`,
+      },
     },
   },
   handler: async (params: Record<string, unknown>) => {
@@ -96,7 +101,17 @@ const autopilotConfig: MCPTool = {
       state.timeoutMinutes = validateNumber(params.timeoutMinutes, 1, 1440, state.timeoutMinutes);
     }
     if (params.taskSources !== undefined) {
-      state.taskSources = validateTaskSources(params.taskSources);
+      const validation = validateConfiguredTaskSources(params.taskSources);
+      if (!validation.valid) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({
+            error: validation.reason,
+            validSources: [...VALID_TASK_SOURCES],
+          }) }],
+          isError: true,
+        };
+      }
+      state.taskSources = validation.sources;
     }
     saveState(state);
     return ok({ maxIterations: state.maxIterations, timeoutMinutes: state.timeoutMinutes, taskSources: state.taskSources });
@@ -105,7 +120,7 @@ const autopilotConfig: MCPTool = {
 
 const autopilotReset: MCPTool = {
   name: 'autopilot_reset',
-  description: 'Reset autopilot iteration counter and restart the timer.',
+  description: 'Reset autopilot iteration counter and restart the timer. Use when running long-horizon goals that should resume automatically across sessions — Claude Code has no native autonomous-loop scheduler. Pair with autopilot_enable + a goal description, then let cron fires advance the work. For interactive single-task sessions, native Task is fine.',
   category: 'autopilot',
   inputSchema: { type: 'object', properties: {} },
   handler: async () => {
@@ -122,7 +137,7 @@ const autopilotReset: MCPTool = {
 
 const autopilotLog: MCPTool = {
   name: 'autopilot_log',
-  description: 'Retrieve the autopilot event log. Shows enable/disable events, re-engagements, completions.',
+  description: 'Retrieve the autopilot event log. Shows enable/disable events, re-engagements, completions. Use when running long-horizon goals that should resume automatically across sessions — Claude Code has no native autonomous-loop scheduler. Pair with autopilot_enable + a goal description, then let cron fires advance the work. For interactive single-task sessions, native Task is fine.',
   category: 'autopilot',
   inputSchema: {
     type: 'object',
@@ -139,7 +154,7 @@ const autopilotLog: MCPTool = {
 
 const autopilotProgress: MCPTool = {
   name: 'autopilot_progress',
-  description: 'Detailed task progress broken down by source (team-tasks, swarm-tasks, file-checklist).',
+  description: 'Detailed task progress broken down by source (team-tasks, swarm-tasks, file-checklist). Use when running long-horizon goals that should resume automatically across sessions — Claude Code has no native autonomous-loop scheduler. Pair with autopilot_enable + a goal description, then let cron fires advance the work. For interactive single-task sessions, native Task is fine.',
   category: 'autopilot',
   inputSchema: { type: 'object', properties: {} },
   handler: async () => {
@@ -166,7 +181,7 @@ const autopilotProgress: MCPTool = {
 
 const autopilotLearn: MCPTool = {
   name: 'autopilot_learn',
-  description: 'Discover success patterns from past task completions. Requires AgentDB for full functionality.',
+  description: 'Discover success patterns from past task completions. Requires AgentDB for full functionality. Use when running long-horizon goals that should resume automatically across sessions — Claude Code has no native autonomous-loop scheduler. Pair with autopilot_enable + a goal description, then let cron fires advance the work. For interactive single-task sessions, native Task is fine.',
   category: 'autopilot',
   inputSchema: { type: 'object', properties: {} },
   handler: async () => {
@@ -184,7 +199,7 @@ const autopilotLearn: MCPTool = {
 
 const autopilotHistory: MCPTool = {
   name: 'autopilot_history',
-  description: 'Search past completion episodes by keyword. Requires AgentDB.',
+  description: 'Search past completion episodes by keyword. Requires AgentDB. Use when running long-horizon goals that should resume automatically across sessions — Claude Code has no native autonomous-loop scheduler. Pair with autopilot_enable + a goal description, then let cron fires advance the work. For interactive single-task sessions, native Task is fine.',
   category: 'autopilot',
   inputSchema: {
     type: 'object',
@@ -210,7 +225,7 @@ const autopilotHistory: MCPTool = {
 
 const autopilotPredict: MCPTool = {
   name: 'autopilot_predict',
-  description: 'Predict the optimal next action based on current state and learned patterns.',
+  description: 'Predict the optimal next action based on current state and learned patterns. Use when running long-horizon goals that should resume automatically across sessions — Claude Code has no native autonomous-loop scheduler. Pair with autopilot_enable + a goal description, then let cron fires advance the work. For interactive single-task sessions, native Task is fine.',
   category: 'autopilot',
   inputSchema: { type: 'object', properties: {} },
   handler: async () => {

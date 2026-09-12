@@ -1,7 +1,7 @@
 {
   "name": "ruflo-sparc",
   "description": "SPARC methodology — Specification, Pseudocode, Architecture, Refinement, Completion phases with gate checks",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "author": {
     "name": "ruvnet",
     "url": "https://github.com/ruvnet"
@@ -14,6 +14,9 @@
     "methodology",
     "specification",
     "architecture",
-    "refinement"
+    "refinement",
+    "mcp",
+    "phase-gates",
+    "quality-gates"
   ]
 }

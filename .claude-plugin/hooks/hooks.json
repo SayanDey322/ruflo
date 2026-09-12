@@ -1,4 +1,7 @@
 {
+  "description": "Hook commands invoke scripts/ruflo-hook.sh (resilient shim): prefers a locally-installed `ruflo`/`claude-flow` binary, falls back to `npx --prefer-offline`, and always exits 0 so a CLI/install failure never surfaces an error in Claude Code or blocks a turn. The trailing `|| true` guards the case where $CLAUDE_PLUGIN_ROOT is unset (older Claude Code) — the hook then no-ops silently. This manifest is intentionally POSIX-only (Mac/Linux): it uses /bin/bash, POSIX pipelines (jq, xargs, tr), and .sh scripts, and is known-broken on native Windows. It is a separately-published legacy \"claude-flow\" plugin package (not in the ruflo marketplace list) with its own jq/xargs-based hook set and its own scripts/ruflo-hook.cjs that this file never references — still needs its own Windows-compatible, Node-based rewrite.",
+  "_platform": "posix",
+  "_legacy_unaudited_shim": true,
   "hooks": {
     "PreToolUse": [
       {
@@ -6,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cat | npx claude-flow@alpha hooks modify-bash"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" modify-bash || true"
           }
         ]
       },
@@ -15,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cat | npx claude-flow@alpha hooks modify-file"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" modify-file || true"
           }
         ]
       }
@@ -26,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cat | jq -r '.tool_input.command // empty' | tr '\\n' '\\0' | xargs -0 -I {} npx claude-flow@alpha hooks post-command --command '{}' --track-metrics true --store-results true"
+            "command": "cat | jq -r '.tool_input.command // empty' | tr '\\n' '\\0' | xargs -0 -I {} \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" post-command --command '{}' --track-metrics true --store-results true || true"
           }
         ]
       },
@@ -35,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cat | jq -r '.tool_input.file_path // .tool_input.path // empty' | tr '\\n' '\\0' | xargs -0 -I {} npx claude-flow@alpha hooks post-edit --file '{}' --format true --update-memory true"
+            "command": "cat | jq -r '.tool_input.file_path // .tool_input.path // empty' | tr '\\n' '\\0' | xargs -0 -I {} \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" post-edit --file '{}' --format true --update-memory true || true"
           }
         ]
       }
@@ -65,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx claude-flow@alpha hooks session-end --generate-summary true --persist-state true --export-metrics true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" session-end --generate-summary true --persist-state true --export-metrics true || true"
           }
         ]
       }

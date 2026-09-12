@@ -23,6 +23,12 @@ const settingsSchema = z.object({
 	hapticsEnabled: z.boolean().default(true),
 	hidePromptExamples: z.record(z.boolean()).default({}),
 	autopilotEnabled: z.boolean().default(true),
+	autopilotMaxSteps: z
+		.number()
+		.int()
+		.min(1)
+		.max(100)
+		.default(DEFAULT_SETTINGS.autopilotMaxSteps),
 	billingOrganization: z.string().optional(),
 });
 
@@ -68,6 +74,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 		toolsOverrides: settings?.toolsOverrides ?? {},
 		providerOverrides: settings?.providerOverrides ?? {},
 		autopilotEnabled: settings?.autopilotEnabled ?? DEFAULT_SETTINGS.autopilotEnabled,
+		autopilotMaxSteps: settings?.autopilotMaxSteps ?? DEFAULT_SETTINGS.autopilotMaxSteps,
 		billingOrganization: settings?.billingOrganization ?? undefined,
 	});
 };

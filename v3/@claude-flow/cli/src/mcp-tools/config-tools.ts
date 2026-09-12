@@ -123,7 +123,7 @@ function setNestedValue(obj: Record<string, unknown>, key: string, value: unknow
 export const configTools: MCPTool[] = [
   {
     name: 'config_get',
-    description: 'Get configuration value',
+    description: 'Get configuration value Use when native settings.json edits are wrong because the values need to be read by the Ruflo runtime (daemon, MCP server, neural router) — those load via the config_* path, not by re-reading settings.json. For .gitignore / .editorconfig style files, native Edit is fine.',
     category: 'config',
     inputSchema: {
       type: 'object',
@@ -170,7 +170,7 @@ export const configTools: MCPTool[] = [
   },
   {
     name: 'config_set',
-    description: 'Set configuration value',
+    description: 'Set configuration value Use when native settings.json edits are wrong because the values need to be read by the Ruflo runtime (daemon, MCP server, neural router) — those load via the config_* path, not by re-reading settings.json. For .gitignore / .editorconfig style files, native Edit is fine.',
     category: 'config',
     inputSchema: {
       type: 'object',
@@ -220,7 +220,7 @@ export const configTools: MCPTool[] = [
   },
   {
     name: 'config_list',
-    description: 'List configuration values',
+    description: 'List configuration values Use when native settings.json edits are wrong because the values need to be read by the Ruflo runtime (daemon, MCP server, neural router) — those load via the config_* path, not by re-reading settings.json. For .gitignore / .editorconfig style files, native Edit is fine.',
     category: 'config',
     inputSchema: {
       type: 'object',
@@ -246,36 +246,46 @@ export const configTools: MCPTool[] = [
       const prefix = input.prefix as string;
       const includeDefaults = input.includeDefaults !== false;
 
-      // Merge stored values with defaults
-      let configs: Record<string, unknown> = {};
+      // ADR-093 F12: enumerate the full configuration union (defaults +
+      // stored values + scope-specific) so config_list matches config_export.
+      // The previous implementation built a flat record where stored values
+      // shadowed defaults silently, and scope keys only appeared when the
+      // caller passed a non-default scope — which made config_list
+      // systematically incomplete.
+
+      // Track the precedence so we can label sources accurately.
+      type Source = 'default' | 'stored' | `scope:${string}`;
+      const merged = new Map<string, { value: unknown; source: Source }>();
 
       if (includeDefaults) {
-        configs = { ...DEFAULT_CONFIG };
+        for (const [key, value] of Object.entries(DEFAULT_CONFIG)) {
+          merged.set(key, { value, source: 'default' });
+        }
+      }
+      for (const [key, value] of Object.entries(store.values)) {
+        merged.set(key, { value, source: 'stored' });
+      }
+      // Always include keys from every scope so they're discoverable; the
+      // scope filter only narrows which set is used as the *winner*.
+      for (const [scopeName, scopeValues] of Object.entries(store.scopes)) {
+        for (const [key, value] of Object.entries(scopeValues)) {
+          if (scope === scopeName || scope === 'default') {
+            merged.set(key, { value, source: `scope:${scopeName}` });
+          } else if (!merged.has(key)) {
+            // Surface scoped keys that aren't shadowed when listing default scope
+            merged.set(key, { value, source: `scope:${scopeName}` });
+          }
+        }
       }
 
-      // Add stored values
-      Object.assign(configs, store.values);
-
-      // Add scope-specific values
-      if (scope !== 'default' && store.scopes[scope]) {
-        Object.assign(configs, store.scopes[scope]);
-      }
-
-      // Filter by prefix
-      let entries = Object.entries(configs);
+      let entries = Array.from(merged.entries());
       if (prefix) {
         entries = entries.filter(([key]) => key.startsWith(prefix));
       }
-
-      // Sort by key
       entries.sort(([a], [b]) => a.localeCompare(b));
 
       return {
-        configs: entries.map(([key, value]) => ({
-          key,
-          value,
-          source: store.values[key] !== undefined ? 'stored' : 'default',
-        })),
+        configs: entries.map(([key, { value, source }]) => ({ key, value, source })),
         total: entries.length,
         scope,
         updatedAt: store.updatedAt,
@@ -284,7 +294,7 @@ export const configTools: MCPTool[] = [
   },
   {
     name: 'config_reset',
-    description: 'Reset configuration to defaults',
+    description: 'Reset configuration to defaults Use when native settings.json edits are wrong because the values need to be read by the Ruflo runtime (daemon, MCP server, neural router) — those load via the config_* path, not by re-reading settings.json. For .gitignore / .editorconfig style files, native Edit is fine.',
     category: 'config',
     inputSchema: {
       type: 'object',
@@ -345,7 +355,7 @@ export const configTools: MCPTool[] = [
   },
   {
     name: 'config_export',
-    description: 'Export configuration to JSON',
+    description: 'Export configuration to JSON Use when native settings.json edits are wrong because the values need to be read by the Ruflo runtime (daemon, MCP server, neural router) — those load via the config_* path, not by re-reading settings.json. For .gitignore / .editorconfig style files, native Edit is fine.',
     category: 'config',
     inputSchema: {
       type: 'object',
@@ -388,7 +398,7 @@ export const configTools: MCPTool[] = [
   },
   {
     name: 'config_import',
-    description: 'Import configuration from JSON',
+    description: 'Import configuration from JSON Use when native settings.json edits are wrong because the values need to be read by the Ruflo runtime (daemon, MCP server, neural router) — those load via the config_* path, not by re-reading settings.json. For .gitignore / .editorconfig style files, native Edit is fine.',
     category: 'config',
     inputSchema: {
       type: 'object',

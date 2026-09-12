@@ -1,7 +1,7 @@
 {
   "name": "ruflo-agentdb",
-  "description": "AgentDB memory controllers with HNSW vector search, RuVector embeddings, and causal knowledge graphs",
-  "version": "0.1.0",
+  "description": "Substrate plugin for Ruflo memory: AgentDB controller bridge (15 agentdb_* MCP tools), RuVector ONNX embeddings (10 embeddings_* tools incl. RaBitQ 32x quantization), and WASM HNSW pattern router (3 ruvllm_hnsw_* tools)",
+  "version": "0.3.1",
   "author": {
     "name": "ruvnet",
     "url": "https://github.com/ruvnet"
@@ -14,6 +14,11 @@
     "ruvector",
     "hnsw",
     "embeddings",
-    "vector-search"
+    "vector-search",
+    "rabitq",
+    "quantization",
+    "namespace-convention",
+    "controller-bridge",
+    "mcp"
   ]
 }

@@ -3,6 +3,8 @@
  * Self-contained RVFA appliance management (build, inspect, verify, extract, run, sign, publish, update)
  */
 
+import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { join as pathJoin, resolve as pathResolve } from 'node:path';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 import { signCommand, publishCommand, updateAppCommand } from './appliance-advanced.js';
@@ -52,8 +54,7 @@ async function loadModule<T>(path: string, exportName: string, label: string): P
 }
 
 async function requireFile(file: string): Promise<boolean> {
-  const fs = await import('fs');
-  if (!fs.existsSync(file)) {
+  if (!existsSync(file)) {
     output.printError(`File not found: ${file}`);
     return false;
   }
@@ -202,8 +203,7 @@ const inspectCommand: Command = {
         output.writeln(output.dim('  No sections found'));
       }
 
-      const fs = await import('fs');
-      const stat = fs.statSync(file);
+      const stat = statSync(file);
       output.writeln();
       output.printInfo(`Total file size: ${output.bold(fmtSize(stat.size))}`);
       if (hdr.footerHash) {
@@ -308,14 +308,11 @@ const extractCommand: Command = {
     if (!(await requireFile(file))) return { success: false, exitCode: 1 };
 
     try {
-      const fs = await import('fs');
-      const path = await import('path');
-
       header('RVFA Extraction');
       const reader = new RvfaReader(file);
       const hdr = await reader.parse();
-      const dest = path.resolve(outputDir);
-      if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
+      const dest = pathResolve(outputDir);
+      if (!existsSync(dest)) mkdirSync(dest, { recursive: true });
       output.printInfo(`Destination: ${dest}`);
       output.writeln();
 
@@ -340,7 +337,7 @@ const extractCommand: Command = {
       output.printSuccess(`Extraction complete: ${dest}`);
       output.writeln(output.dim('  Directory structure:'));
       for (const d of ['kernel', 'runtime', 'ruflo', 'models', 'data', 'verify']) {
-        const exists = fs.existsSync(path.join(dest, d));
+        const exists = existsSync(pathJoin(dest, d));
         output.writeln(`  ${exists ? output.success('+') : output.dim('-')} ${d}/`);
       }
       return { success: true };

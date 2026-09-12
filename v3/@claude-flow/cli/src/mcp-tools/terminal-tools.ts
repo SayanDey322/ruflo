@@ -5,8 +5,13 @@
  */
 
 import { type MCPTool, getProjectCwd } from './types.js';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { validateIdentifier, validatePath, validateText } from './validate-input.js';
+import { existsSync } from 'node:fs';
+import {
+  mkdirRestricted,
+  readFileMaybeEncrypted,
+  writeFileRestricted,
+} from '../fs-secure.js';
+import { validateEnv, validateIdentifier, validatePath, validateText } from './validate-input.js';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 
@@ -42,7 +47,7 @@ function getTerminalPath(): string {
 function ensureTerminalDir(): void {
   const dir = getTerminalDir();
   if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
+    mkdirRestricted(dir);
   }
 }
 
@@ -50,7 +55,10 @@ function loadTerminalStore(): TerminalStore {
   try {
     const path = getTerminalPath();
     if (existsSync(path)) {
-      return JSON.parse(readFileSync(path, 'utf-8'));
+      // ADR-096 Phase 3: readFileMaybeEncrypted handles both legacy
+      // plaintext stores and post-migration encrypted ones via the RFE1
+      // magic-byte sniff.
+      return JSON.parse(readFileMaybeEncrypted(path, 'utf-8'));
     }
   } catch {
     // Return empty store
@@ -60,13 +68,22 @@ function loadTerminalStore(): TerminalStore {
 
 function saveTerminalStore(store: TerminalStore): void {
   ensureTerminalDir();
-  writeFileSync(getTerminalPath(), JSON.stringify(store, null, 2), 'utf-8');
+  // audit_1776853149979: terminal command history can contain credentials
+  // pasted into commands; restrict to owner read/write (mode 0600).
+  // ADR-096 Phase 3: opt-in AES-256-GCM encrypt-at-rest. Honored only
+  // when CLAUDE_FLOW_ENCRYPT_AT_REST is set; otherwise legacy plaintext
+  // path runs unchanged.
+  writeFileRestricted(
+    getTerminalPath(),
+    JSON.stringify(store, null, 2),
+    { encrypt: true },
+  );
 }
 
 export const terminalTools: MCPTool[] = [
   {
     name: 'terminal_create',
-    description: 'Create a new terminal session',
+    description: 'Create a new terminal session Use when native Bash is wrong because you need a persistent terminal session across turns/agents with output capture and replay. For one-shot shell commands, native Bash is fine.',
     category: 'terminal',
     inputSchema: {
       type: 'object',
@@ -77,7 +94,7 @@ export const terminalTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
-      // Validate user-provided input (#1425)
+      // Validate user-provided input (#1425, audit_1776853149979)
       if (input.name) {
         const v = validateText(input.name, 'name', 256);
         if (!v.valid) return { success: false, error: v.error };
@@ -86,6 +103,11 @@ export const terminalTools: MCPTool[] = [
         const v = validatePath(input.workingDir, 'workingDir');
         if (!v.valid) return { success: false, error: v.error };
       }
+      // env is merged into execSync's process env on every command; reject
+      // loader/runtime hijack vars (LD_PRELOAD, NODE_OPTIONS, …) and enforce
+      // POSIX-shaped names + null-byte-free values.
+      const vEnv = validateEnv(input.env, 'env');
+      if (!vEnv.valid) return { success: false, error: vEnv.error };
 
       const store = loadTerminalStore();
       const id = `term-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -98,7 +120,7 @@ export const terminalTools: MCPTool[] = [
         lastActivity: new Date().toISOString(),
         workingDir: (input.workingDir as string) || getProjectCwd(),
         history: [],
-        env: (input.env as Record<string, string>) || {},
+        env: vEnv.sanitized,
       };
 
       store.sessions[id] = session;
@@ -116,7 +138,7 @@ export const terminalTools: MCPTool[] = [
   },
   {
     name: 'terminal_execute',
-    description: 'Execute a command in a terminal session',
+    description: 'Execute a command in a terminal session Use when native Bash is wrong because you need a persistent terminal session across turns/agents with output capture and replay. For one-shot shell commands, native Bash is fine.',
     category: 'terminal',
     inputSchema: {
       type: 'object',
@@ -209,7 +231,7 @@ export const terminalTools: MCPTool[] = [
   },
   {
     name: 'terminal_list',
-    description: 'List all terminal sessions',
+    description: 'List all terminal sessions Use when native Bash is wrong because you need a persistent terminal session across turns/agents with output capture and replay. For one-shot shell commands, native Bash is fine.',
     category: 'terminal',
     inputSchema: {
       type: 'object',
@@ -244,7 +266,7 @@ export const terminalTools: MCPTool[] = [
   },
   {
     name: 'terminal_close',
-    description: 'Close a terminal session',
+    description: 'Close a terminal session Use when native Bash is wrong because you need a persistent terminal session across turns/agents with output capture and replay. For one-shot shell commands, native Bash is fine.',
     category: 'terminal',
     inputSchema: {
       type: 'object',
@@ -279,7 +301,7 @@ export const terminalTools: MCPTool[] = [
   },
   {
     name: 'terminal_history',
-    description: 'Get command history for a terminal session',
+    description: 'Get command history for a terminal session Use when native Bash is wrong because you need a persistent terminal session across turns/agents with output capture and replay. For one-shot shell commands, native Bash is fine.',
     category: 'terminal',
     inputSchema: {
       type: 'object',

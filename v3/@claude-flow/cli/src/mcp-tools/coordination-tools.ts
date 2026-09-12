@@ -132,7 +132,7 @@ function saveCoordStore(store: CoordinationStore): void {
 export const coordinationTools: MCPTool[] = [
   {
     name: 'coordination_topology',
-    description: 'Configure swarm topology',
+    description: 'Configure swarm topology Use when native Task is wrong because the work crosses multiple agents that need to vote/sync/load-balance — TodoWrite + a single Task cannot orchestrate consensus. For one-off subtask dispatch, native Task is fine.',
     category: 'coordination',
     inputSchema: {
       type: 'object',
@@ -203,7 +203,7 @@ export const coordinationTools: MCPTool[] = [
   },
   {
     name: 'coordination_load_balance',
-    description: 'Configure load balancing',
+    description: 'Configure load balancing Use when native Task is wrong because the work crosses multiple agents that need to vote/sync/load-balance — TodoWrite + a single Task cannot orchestrate consensus. For one-off subtask dispatch, native Task is fine.',
     category: 'coordination',
     inputSchema: {
       type: 'object',
@@ -291,7 +291,7 @@ export const coordinationTools: MCPTool[] = [
   },
   {
     name: 'coordination_sync',
-    description: 'Synchronize state across nodes',
+    description: 'Synchronize state across nodes Use when native Task is wrong because the work crosses multiple agents that need to vote/sync/load-balance — TodoWrite + a single Task cannot orchestrate consensus. For one-off subtask dispatch, native Task is fine.',
     category: 'coordination',
     inputSchema: {
       type: 'object',
@@ -363,7 +363,7 @@ export const coordinationTools: MCPTool[] = [
   },
   {
     name: 'coordination_node',
-    description: 'Manage coordination nodes',
+    description: 'Manage coordination nodes Use when native Task is wrong because the work crosses multiple agents that need to vote/sync/load-balance — TodoWrite + a single Task cannot orchestrate consensus. For one-off subtask dispatch, native Task is fine.',
     category: 'coordination',
     inputSchema: {
       type: 'object',
@@ -454,7 +454,7 @@ export const coordinationTools: MCPTool[] = [
   },
   {
     name: 'coordination_consensus',
-    description: 'Manage consensus protocol with BFT, Raft, or Quorum strategies',
+    description: 'Manage consensus protocol with BFT, Raft, or Quorum strategies Use when native Task is wrong because the work crosses multiple agents that need to vote/sync/load-balance — TodoWrite + a single Task cannot orchestrate consensus. For one-off subtask dispatch, native Task is fine.',
     category: 'coordination',
     inputSchema: {
       type: 'object',
@@ -699,7 +699,7 @@ export const coordinationTools: MCPTool[] = [
   },
   {
     name: 'coordination_orchestrate',
-    description: 'Orchestrate multi-agent coordination',
+    description: 'Orchestrate multi-agent coordination Use when native Task is wrong because the work crosses multiple agents that need to vote/sync/load-balance — TodoWrite + a single Task cannot orchestrate consensus. For one-off subtask dispatch, native Task is fine.',
     category: 'coordination',
     inputSchema: {
       type: 'object',
@@ -724,21 +724,50 @@ export const coordinationTools: MCPTool[] = [
 
       const orchestrationId = `orch-${Date.now()}`;
 
+      // ADR-093 F7: this tool only schedules an orchestration record — it
+      // does not actually execute. Previously it returned a hardcoded
+      // `estimatedCompletion: "50ms"` which was misleading. Now we return
+      // an honest stub-status with a note pointing callers at agent_spawn
+      // / Task tool / hive-mind tools for real orchestration. Persist the
+      // record so callers can list/inspect what was scheduled.
+      const orchestration = {
+        id: orchestrationId,
+        task,
+        strategy,
+        agents,
+        status: 'scheduled' as const,
+        scheduledAt: new Date().toISOString(),
+        topology: store.topology.type,
+      };
+      // Best-effort persist — keep last 100 scheduled orchestrations.
+      type CoordStoreShape = ReturnType<typeof loadCoordStore> & {
+        orchestrations?: Array<typeof orchestration>;
+      };
+      const orchStore = store as CoordStoreShape;
+      if (!Array.isArray(orchStore.orchestrations)) orchStore.orchestrations = [];
+      orchStore.orchestrations.push(orchestration);
+      if (orchStore.orchestrations.length > 100) {
+        orchStore.orchestrations = orchStore.orchestrations.slice(-100);
+      }
+      saveCoordStore(orchStore);
+
       return {
         success: true,
         orchestrationId,
         task,
         strategy,
         agents,
-        status: 'initiated',
+        status: 'scheduled',
         topology: store.topology.type,
-        estimatedCompletion: `${agents.length * (strategy === 'sequential' ? 100 : 50)}ms`,
+        // Honest stub: no executor wired up yet. Don't lie about completion time.
+        executor: 'none',
+        _note: 'coordination_orchestrate currently records the orchestration request but does not execute it. For real multi-agent execution use agent_spawn + the Task tool, or hive-mind_spawn for queen-led coordination. Real executor tracked in issue #2140.',
       };
     },
   },
   {
     name: 'coordination_metrics',
-    description: 'Get coordination metrics',
+    description: 'Get coordination metrics Use when native Task is wrong because the work crosses multiple agents that need to vote/sync/load-balance — TodoWrite + a single Task cannot orchestrate consensus. For one-off subtask dispatch, native Task is fine.',
     category: 'coordination',
     inputSchema: {
       type: 'object',

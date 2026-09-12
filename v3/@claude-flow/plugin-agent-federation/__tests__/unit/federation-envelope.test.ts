@@ -212,8 +212,8 @@ describe('FederationEnvelope', () => {
       expect(CONSENSUS_REQUIRED_TYPES.has('agent-spawn')).toBe(true);
     });
 
-    it('should contain exactly 3 entries', () => {
-      expect(CONSENSUS_REQUIRED_TYPES.size).toBe(3);
+    it('should contain exactly 4 entries (ADR-101 added agent-handoff)', () => {
+      expect(CONSENSUS_REQUIRED_TYPES.size).toBe(4);
     });
   });
 
@@ -234,17 +234,20 @@ describe('FederationEnvelope', () => {
       'handshake-accept',
       'handshake-reject',
       'session-terminate',
+      // ADR-101 Component C
+      'claim-event',
+      'agent-handoff',
     ];
 
-    it('should accept all 15 message types as valid', () => {
+    it('should accept all 17 message types as valid', () => {
       for (const msgType of allMessageTypes) {
         const envelope = new FederationEnvelope(makeProps({ messageType: msgType }));
         expect(envelope.messageType).toBe(msgType);
       }
     });
 
-    it('should have exactly 15 known message types', () => {
-      expect(allMessageTypes).toHaveLength(15);
+    it('should have exactly 17 known message types (15 base + 2 from ADR-101)', () => {
+      expect(allMessageTypes).toHaveLength(17);
     });
   });
 });

@@ -1,6 +1,12 @@
 {
   "$schema": "https://code.claude.com/schemas/hooks.json",
-  "description": "Claude Flow hooks configuration - Maps to official Claude Code hook events",
+  "description": "Claude Flow hooks configuration — uses stdin-jq-xargs pattern to prevent shell-injection when tool inputs contain quotes / redirects / special chars (#1747). Hook subcommands run via scripts/ruflo-hook.sh (#1921).",
+  "_security_note": "All commands read the hook payload from stdin (Claude Code passes a JSON object), extract fields with jq, and pass them to the CLI as a single argv element via xargs -0. This bypasses shell re-parsing entirely. DO NOT inline $TOOL_INPUT_* / $PROMPT / $TOOL_NAME directly in a quoted command string — interpolation is not shell-safe (creates empty files at CWD when input contains '>' redirects).",
+  "_resilience_note": "#1921 — hook subcommands invoke scripts/ruflo-hook.sh (resilient shim): prefers a locally-installed `ruflo`/`claude-flow` binary, falls back to `npx --prefer-offline`, always exits 0. The trailing `|| true` on each pipeline guards the case where $CLAUDE_PLUGIN_ROOT is unset. DO NOT revert to a bare `npx <pkg>@alpha hooks …` per fire.",
+  "_platform": "posix",
+  "_platform_note": "#2132 — This hooks.json uses /bin/bash, POSIX pipelines (jq, xargs, tr), and .sh scripts. It is intentionally POSIX-only (Mac/Linux) today and known-broken on native Windows (#2721 shape). The previous claim here that `ruflo init` overrides these entries with node-based equivalents on Windows was never actually implemented and is incorrect — Claude Code merges plugin-declared hooks additively with any init-generated settings.json, it does not replace them. This package (separate from plugins/ruflo-core, which got the #2721 fix) still needs its own Windows-compatible rewrite; see _legacy_unaudited_shim below.",
+  "_legacy_unaudited_shim": true,
+  "_legacy_unaudited_shim_note": "#2721 fixed plugins/ruflo-core and plugins/ruflo-cost-tracker (marketplace-listed in .claude-plugin/marketplace.json) by rewiring hooks.json to a `node -e` bootstrap around scripts/ruflo-hook.cjs. This older, separately-published \"claude-flow\" plugin package (not in the ruflo marketplace list) has its own, larger jq/xargs-based hook set and its own scripts/ruflo-hook.cjs that hooks.json never references — same underlying bug shape, NOT fixed as part of #2721. Needs its own audited pass before this flag can be removed.",
   "hooks": {
     "PreToolUse": [
       {
@@ -9,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx claude-flow@alpha hooks pre-edit --file \"$TOOL_INPUT_file_path\"",
+            "command": "cat | jq -r '.tool_input.file_path // .tool_input.path // empty' | tr '\\n' '\\0' | xargs -0 -I {} \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" pre-edit --file '{}' || true",
             "timeout": 5000,
             "continueOnError": true
           }
@@ -21,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx claude-flow@alpha hooks pre-command --command \"$TOOL_INPUT_command\"",
+            "command": "cat | jq -r '.tool_input.command // empty' | tr '\\n' '\\0' | xargs -0 -I {} \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" pre-command --command '{}' || true",
             "timeout": 3000,
             "continueOnError": true
           }
@@ -33,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx claude-flow@alpha hooks pre-task --description \"$(echo \"$TOOL_INPUT_description\" | head -c 200)\"",
+            "command": "cat | jq -r '.tool_input.description // empty | .[:200]' | tr '\\n' '\\0' | xargs -0 -I {} \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" pre-task --description '{}' || true",
             "timeout": 5000,
             "continueOnError": true
           }
@@ -45,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx claude-flow@alpha hooks pre-search --query \"$TOOL_INPUT_pattern\"",
+            "command": "cat | jq -r '.tool_input.pattern // .tool_input.query // empty' | tr '\\n' '\\0' | xargs -0 -I {} \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" pre-search --query '{}' || true",
             "timeout": 2000,
             "continueOnError": true
           }
@@ -57,7 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx claude-flow@alpha hooks mcp-pre --tool \"$TOOL_NAME\"",
+            "command": "cat | jq -r '.tool_name // empty' | tr '\\n' '\\0' | xargs -0 -I {} \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" mcp-pre --tool '{}' || true",
             "timeout": 3000,
             "continueOnError": true
           }
@@ -71,7 +77,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx claude-flow@alpha hooks post-edit --file \"$TOOL_INPUT_file_path\" --success \"$TOOL_SUCCESS\" --train-patterns",
+            "command": "cat | jq -r '.tool_input.file_path // .tool_input.path // empty' | tr '\\n' '\\0' | xargs -0 -I {} \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" post-edit --file '{}' --train-patterns || true",
             "timeout": 5000,
             "continueOnError": true
           }
@@ -83,7 +89,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx claude-flow@alpha hooks post-command --command \"$TOOL_INPUT_command\" --success \"$TOOL_SUCCESS\" --exit-code \"$TOOL_EXIT_CODE\"",
+            "command": "cat | jq -r '.tool_input.command // empty' | tr '\\n' '\\0' | xargs -0 -I {} \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" post-command --command '{}' --track-metrics true --store-results true || true",
             "timeout": 3000,
             "continueOnError": true
           }
@@ -95,7 +101,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx claude-flow@alpha hooks post-task --task-id \"$TOOL_RESULT_agent_id\" --success \"$TOOL_SUCCESS\" --analyze-performance",
+            "command": "cat | jq -r '.tool_response.agent_id // .tool_response.task_id // empty' | tr '\\n' '\\0' | xargs -0 -I {} \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" post-task --task-id '{}' --analyze-performance || true",
             "timeout": 5000,
             "continueOnError": true
           }
@@ -107,7 +113,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx claude-flow@alpha hooks post-search --query \"$TOOL_INPUT_pattern\" --cache-results",
+            "command": "cat | jq -r '.tool_input.pattern // .tool_input.query // empty' | tr '\\n' '\\0' | xargs -0 -I {} \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" post-search --query '{}' --cache-results || true",
             "timeout": 2000,
             "continueOnError": true
           }
@@ -119,7 +125,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx claude-flow@alpha hooks mcp-post --tool \"$TOOL_NAME\" --success \"$TOOL_SUCCESS\"",
+            "command": "cat | jq -r '.tool_name // empty' | tr '\\n' '\\0' | xargs -0 -I {} \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" mcp-post --tool '{}' || true",
             "timeout": 3000,
             "continueOnError": true
           }
@@ -132,7 +138,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx claude-flow@alpha hooks route --task \"$PROMPT\" --include-explanation",
+            "command": "cat | jq -r '.prompt // empty' | tr '\\n' '\\0' | xargs -0 -I {} \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" route --task '{}' --include-explanation || true",
             "timeout": 5000,
             "continueOnError": true
           }
@@ -145,7 +151,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx claude-flow@alpha hooks session-start --session-id \"$SESSION_ID\" --load-context",
+            "command": "cat | jq -r '.session_id // empty' | tr '\\n' '\\0' | xargs -0 -I {} \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" session-start --session-id '{}' --load-context || true",
             "timeout": 10000,
             "continueOnError": true
           }
@@ -180,7 +186,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx claude-flow@alpha hooks notify --message \"$NOTIFICATION_MESSAGE\" --swarm-status",
+            "command": "cat | jq -r '.message // empty' | tr '\\n' '\\0' | xargs -0 -I {} \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.sh\" notify --message '{}' --swarm-status || true",
             "timeout": 3000,
             "continueOnError": true
           }

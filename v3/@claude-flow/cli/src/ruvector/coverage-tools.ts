@@ -22,9 +22,9 @@ import {
  * Uses ruvector's hooks_coverage_route when available.
  */
 export const hooksCoverageRoute: MCPTool = {
-  name: 'hooks/coverage-route',
+  name: 'hooks_coverage-route',
   description: 'Route task to agents based on test coverage gaps (ruvector integration)',
-  category: 'coverage',
+  category: 'hooks',
   tags: ['coverage', 'routing', 'testing', 'ruvector'],
   inputSchema: {
     type: 'object',
@@ -69,9 +69,9 @@ export const hooksCoverageRoute: MCPTool = {
  * Uses ruvector's hooks_coverage_suggest when available.
  */
 export const hooksCoverageSuggest: MCPTool = {
-  name: 'hooks/coverage-suggest',
+  name: 'hooks_coverage-suggest',
   description: 'Suggest coverage improvements for a path (ruvector integration)',
-  category: 'coverage',
+  category: 'hooks',
   tags: ['coverage', 'suggestions', 'testing', 'ruvector'],
   inputSchema: {
     type: 'object',
@@ -121,9 +121,9 @@ export const hooksCoverageSuggest: MCPTool = {
  * Lists all coverage gaps in the project with agent assignments.
  */
 export const hooksCoverageGaps: MCPTool = {
-  name: 'hooks/coverage-gaps',
+  name: 'hooks_coverage-gaps',
   description: 'List all coverage gaps with priority scoring and agent assignments',
-  category: 'coverage',
+  category: 'hooks',
   tags: ['coverage', 'gaps', 'testing', 'analysis'],
   inputSchema: {
     type: 'object',

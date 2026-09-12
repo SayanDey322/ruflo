@@ -119,7 +119,7 @@ export const wasmCreateCommand: Command = {
     {
       name: 'model',
       short: 'm',
-      description: 'Model identifier (default: anthropic:claude-sonnet-4-20250514)',
+      description: 'Model identifier (default: anthropic:claude-sonnet-4-6)',
       type: 'string',
     },
     {
@@ -138,7 +138,7 @@ export const wasmCreateCommand: Command = {
   examples: [
     { command: 'claude-flow agent wasm-create', description: 'Create a default WASM agent' },
     { command: 'claude-flow agent wasm-create -t coder', description: 'Create from gallery template' },
-    { command: 'claude-flow agent wasm-create -m "anthropic:claude-sonnet-4-20250514" -i "You are a security auditor"', description: 'Create with custom config' },
+    { command: 'claude-flow agent wasm-create -m "anthropic:claude-sonnet-4-6" -i "You are a security auditor"', description: 'Create with custom config' },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
     try {

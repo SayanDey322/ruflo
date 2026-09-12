@@ -204,7 +204,7 @@ const createCommand: Command = {
           { property: 'Priority', value: formatPriority(result.priority) },
           { property: 'Status', value: formatStatus(result.status) },
           { property: 'Assigned To', value: result.assignedTo?.join(', ') || 'Unassigned' },
-          { property: 'Tags', value: result.tags.join(', ') || 'None' },
+          { property: 'Tags', value: result.tags?.join(', ') || 'None' }, // #1863 — guard undefined array
           { property: 'Created', value: new Date(result.createdAt).toLocaleString() }
         ]
       });
@@ -436,11 +436,15 @@ const statusCommand: Command = {
           { key: 'value', header: 'Value', width: 40 }
         ],
         data: [
+          // #1863 — tasks created via task_create or loaded from an older
+          // store schema may not have these arrays populated; guard each
+          // `.join()` so `task status` never throws "Cannot read properties
+          // of undefined (reading 'join')".
           { property: 'Assigned To', value: result.assignedTo?.join(', ') || 'Unassigned' },
           { property: 'Parent Task', value: result.parentId || 'None' },
-          { property: 'Dependencies', value: result.dependencies.join(', ') || 'None' },
-          { property: 'Dependents', value: result.dependents.join(', ') || 'None' },
-          { property: 'Tags', value: result.tags.join(', ') || 'None' }
+          { property: 'Dependencies', value: result.dependencies?.join(', ') || 'None' },
+          { property: 'Dependents', value: result.dependents?.join(', ') || 'None' },
+          { property: 'Tags', value: result.tags?.join(', ') || 'None' }
         ]
       });
 

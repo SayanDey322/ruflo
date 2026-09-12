@@ -466,7 +466,7 @@ export async function validateConfigToml(content: string): Promise<ValidationRes
     warnings.push({
       path: 'config.toml',
       message: 'No MCP servers configured',
-      suggestion: 'Add [mcp_servers.claude-flow] for Claude Flow integration',
+      suggestion: 'Add [mcp_servers.ruflo] for Claude Flow integration',
     });
   } else {
     // Validate MCP server configurations

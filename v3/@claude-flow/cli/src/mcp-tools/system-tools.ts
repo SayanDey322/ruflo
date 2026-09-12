@@ -101,7 +101,7 @@ function saveMetrics(metrics: SystemMetrics): void {
 export const systemTools: MCPTool[] = [
   {
     name: 'system_status',
-    description: 'Get overall system status',
+    description: 'Get overall system status Use when native Bash is wrong because you need Ruflo runtime metrics (HNSW index size, ReasoningBank state, swarm health, breaker status) — those are not in /proc, only in the running daemon. For OS-level info (uptime, disk, mem), native Bash + standard tools are fine.',
     category: 'system',
     inputSchema: {
       type: 'object',
@@ -112,7 +112,10 @@ export const systemTools: MCPTool[] = [
     },
     handler: async (input) => {
       const metrics = loadMetrics();
-      const uptime = Date.now() - new Date(metrics.startTime).getTime();
+      // #2235(B) — live process uptime, not the persisted metrics.startTime
+      // (which is the file's creation timestamp and survived across restarts,
+      // making system_status report stale ~8.8-day uptime on a fresh server).
+      const uptime = Math.floor(process.uptime() * 1000);
 
       const status = {
         status: metrics.health >= 0.8 ? 'healthy' : metrics.health >= 0.5 ? 'degraded' : 'unhealthy',
@@ -145,7 +148,7 @@ export const systemTools: MCPTool[] = [
   },
   {
     name: 'system_metrics',
-    description: 'Get system metrics and performance data',
+    description: 'Get system metrics and performance data Use when native Bash is wrong because you need Ruflo runtime metrics (HNSW index size, ReasoningBank state, swarm health, breaker status) — those are not in /proc, only in the running daemon. For OS-level info (uptime, disk, mem), native Bash + standard tools are fine.',
     category: 'system',
     inputSchema: {
       type: 'object',
@@ -252,7 +255,7 @@ export const systemTools: MCPTool[] = [
           } catch { /* tracker not available — fall back to stored value */ }
           return store.requests;
         })(),
-        uptime: Date.now() - new Date(store.startTime).getTime(),
+        uptime: Math.floor(process.uptime() * 1000), // #2235(B) — live process uptime
         lastCheck: new Date().toISOString(),
       };
 
@@ -298,7 +301,7 @@ export const systemTools: MCPTool[] = [
   },
   {
     name: 'system_health',
-    description: 'Perform system health check',
+    description: 'Perform system health check Use when native Bash is wrong because you need Ruflo runtime metrics (HNSW index size, ReasoningBank state, swarm health, breaker status) — those are not in /proc, only in the running daemon. For OS-level info (uptime, disk, mem), native Bash + standard tools are fine.',
     category: 'system',
     inputSchema: {
       type: 'object',
@@ -313,13 +316,21 @@ export const systemTools: MCPTool[] = [
       const checks: Array<{ name: string; status: string; latency?: number; message?: string }> = [];
       const projectCwd = getProjectCwd();
 
-      // Memory DB check — verify any supported store file exists
+      // Memory DB check — verify any supported store file exists.
+      // #1843: cover sql.js / HNSW / .swarm and root-level rvf/db paths,
+      // not just the legacy `.claude-flow/memory/*` triple.
       {
         const t0 = performance.now();
-        const legacyPath = join(projectCwd, '.claude-flow', 'memory', 'store.json');
-        const agentDbPath = join(projectCwd, '.claude-flow', 'memory', 'agentdb.sqlite');
-        const rvfPath = join(projectCwd, '.claude-flow', 'memory', 'store.rvf');
-        const memoryExists = existsSync(legacyPath) || existsSync(agentDbPath) || existsSync(rvfPath);
+        const memoryCandidates = [
+          join(projectCwd, '.claude-flow', 'memory', 'store.json'),       // legacy
+          join(projectCwd, '.claude-flow', 'memory', 'agentdb.sqlite'),
+          join(projectCwd, '.claude-flow', 'memory', 'store.rvf'),
+          join(projectCwd, '.claude-flow', 'memory', 'claude-flow.db'),   // sql.js
+          join(projectCwd, '.swarm', 'memory.db'),                        // swarm
+          join(projectCwd, 'ruvector.db'),                                // ruvector
+          join(projectCwd, 'agentdb.rvf'),                                // root rvf
+        ];
+        const memoryExists = memoryCandidates.some(existsSync);
         const elapsed = performance.now() - t0;
         checks.push({
           name: 'memory',
@@ -329,12 +340,21 @@ export const systemTools: MCPTool[] = [
         });
       }
 
-      // Config check — verify config file exists
+      // Config check — verify config file exists.
+      // #1843: also accept YAML config (.claude-flow/config.yaml) which
+      // the rest of v3 treats as canonical; previous code only counted
+      // .json variants and reported `degraded` when YAML was used.
       {
         const t0 = performance.now();
-        const configPath = join(projectCwd, '.claude-flow', 'config.json');
-        const altConfigPath = join(projectCwd, 'claude-flow.config.json');
-        const configExists = existsSync(configPath) || existsSync(altConfigPath);
+        const configCandidates = [
+          join(projectCwd, '.claude-flow', 'config.json'),
+          join(projectCwd, '.claude-flow', 'config.yaml'),
+          join(projectCwd, '.claude-flow', 'config.yml'),
+          join(projectCwd, 'claude-flow.config.json'),
+          join(projectCwd, 'claude-flow.config.yaml'),
+          join(projectCwd, 'claude-flow.config.yml'),
+        ];
+        const configExists = configCandidates.some(existsSync);
         const elapsed = performance.now() - t0;
         checks.push({
           name: 'config',
@@ -438,9 +458,16 @@ export const systemTools: MCPTool[] = [
         }
       }
 
+      // #1843: exclude `unknown` checks from the health score denominator.
+      // Previously a check reporting `unknown` (e.g. swarm/neural which
+      // can't be probed in-process) was counted as a non-healthy hit and
+      // dragged the score below 100 even when every actionable check was
+      // green. Treat `unknown` as advisory and surface it separately.
       const healthy = checks.filter(c => c.status === 'healthy').length;
+      const advisory = checks.filter(c => c.status === 'unknown').length;
       const total = checks.length;
-      const overallHealth = healthy / total;
+      const scoreDenominator = total - advisory;
+      const overallHealth = scoreDenominator > 0 ? healthy / scoreDenominator : 1;
 
       // Update metrics
       metrics.health = overallHealth;
@@ -451,9 +478,10 @@ export const systemTools: MCPTool[] = [
         score: Math.round(overallHealth * 100),
         checks,
         healthy,
+        advisory,
         total,
         timestamp: new Date().toISOString(),
-        issues: checks.filter(c => c.status !== 'healthy').map(c => ({
+        issues: checks.filter(c => c.status !== 'healthy' && c.status !== 'unknown').map(c => ({
           component: c.name,
           status: c.status,
           suggestion: `Check ${c.name} component configuration`,
@@ -463,7 +491,7 @@ export const systemTools: MCPTool[] = [
   },
   {
     name: 'system_info',
-    description: 'Get system information',
+    description: 'Get system information Use when native Bash is wrong because you need Ruflo runtime metrics (HNSW index size, ReasoningBank state, swarm health, breaker status) — those are not in /proc, only in the running daemon. For OS-level info (uptime, disk, mem), native Bash + standard tools are fine.',
     category: 'system',
     inputSchema: {
       type: 'object',
@@ -472,6 +500,17 @@ export const systemTools: MCPTool[] = [
       },
     },
     handler: async () => {
+      // #2215: flashAttention must reflect the runtime probe, not a stale literal.
+      // Same source-of-truth as hooks_intelligence / neural_status so the tools
+      // can never report contradictory state for the same daemon.
+      let flashAttentionAvailable = false;
+      try {
+        const { getFlashAttention } = await import('@claude-flow/neural');
+        flashAttentionAvailable = getFlashAttention() !== null;
+      } catch {
+        flashAttentionAvailable = false;
+      }
+
       return {
         version: PKG_VERSION,
         nodeVersion: process.version,
@@ -486,7 +525,7 @@ export const systemTools: MCPTool[] = [
           neural: true,
           hnsw: true,
           quantization: true,
-          flashAttention: false,
+          flashAttention: flashAttentionAvailable,
         },
         limits: {
           maxAgents: 100,
@@ -498,7 +537,7 @@ export const systemTools: MCPTool[] = [
   },
   {
     name: 'system_reset',
-    description: 'Reset system state',
+    description: 'Reset system state Use when native Bash is wrong because you need Ruflo runtime metrics (HNSW index size, ReasoningBank state, swarm health, breaker status) — those are not in /proc, only in the running daemon. For OS-level info (uptime, disk, mem), native Bash + standard tools are fine.',
     category: 'system',
     inputSchema: {
       type: 'object',
@@ -541,7 +580,7 @@ export const systemTools: MCPTool[] = [
   },
   {
     name: 'mcp_status',
-    description: 'Get MCP server status, including stdio mode detection',
+    description: 'Get MCP server status, including stdio mode detection Use when native Claude Code MCP status is wrong because you need Ruflo-side server detail — tool counts per namespace, transport stats, MCP handshake errors. For just "is MCP up?", `claude mcp list` is fine.',
     category: 'system',
     inputSchema: {
       type: 'object',
@@ -600,7 +639,7 @@ export const systemTools: MCPTool[] = [
   },
   {
     name: 'task_summary',
-    description: 'Get a summary of all tasks by status',
+    description: 'Get a summary of all tasks by status Use when native TodoWrite is wrong because you need cross-session task persistence, agent assignment, dependency tracking, or completion analytics in the .swarm/memory.db. For in-session checklists native TodoWrite is simpler and faster.',
     category: 'task',
     inputSchema: {
       type: 'object',
@@ -626,6 +665,54 @@ export const systemTools: MCPTool[] = [
         running: tasks.filter(t => t.status === 'in_progress').length,
         completed: tasks.filter(t => t.status === 'completed').length,
         failed: tasks.filter(t => t.status === 'failed').length,
+      };
+    },
+  },
+  {
+    // #1916: `ruflo start` referenced an unregistered `mcp_start` tool. MCP
+    // tools run *in-process* via the CLI's TOOL_REGISTRY — there is no
+    // separate server process to spawn from inside an MCP call. If this tool
+    // responds, MCP is already up. (`ruflo mcp start` runs a standalone
+    // stdio/HTTP server; that's a process command, not an MCP tool.)
+    name: 'mcp_start',
+    description: 'Report that the in-process MCP toolset is available (no-op "start" — if this tool responds, MCP is up). Use when native `claude mcp list` is wrong because you want Ruflo-side confirmation that the in-process registry loaded. For a standalone stdio/HTTP MCP server, run `ruflo mcp start` (a process command, not this tool). Pair with mcp_status for detail.',
+    category: 'system',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        port: { type: 'number', description: 'Port (advisory — in-process MCP has no port)' },
+        transport: { type: 'string', description: 'Transport (advisory)' },
+        tools: { type: 'array', items: { type: 'string' }, description: 'Tool namespaces (advisory — all are loaded)' },
+      },
+    },
+    handler: async (input) => {
+      const isStdio = !process.stdin.isTTY;
+      return {
+        serverId: `in-process-${process.pid}`,
+        port: typeof input.port === 'number' ? input.port : (parseInt(process.env.CLAUDE_FLOW_MCP_PORT || '0', 10) || null),
+        transport: (input.transport as string) || process.env.CLAUDE_FLOW_MCP_TRANSPORT || (isStdio ? 'stdio' : 'in-process'),
+        startedAt: new Date().toISOString(),
+        note: 'MCP tools run in-process via the CLI; no separate server process was started. Use `ruflo mcp start` for a standalone server.',
+      };
+    },
+  },
+  {
+    // #1916: `ruflo stop` referenced an unregistered `mcp_stop` tool. Same
+    // story as mcp_start — nothing to stop for the in-process registry.
+    name: 'mcp_stop',
+    description: 'No-op "stop" for the in-process MCP toolset (there is no separate server process to stop from inside an MCP call). Use when native process-kill is wrong because you mistakenly think Ruflo runs a daemon — it does not, the tools live in the CLI process. To stop a standalone server run `ruflo mcp stop` or terminate that process. Pair with mcp_status.',
+    category: 'system',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        graceful: { type: 'boolean', description: 'Advisory (no-op)' },
+        timeout: { type: 'number', description: 'Advisory (no-op)' },
+      },
+    },
+    handler: async () => {
+      return {
+        stopped: false,
+        note: 'no separate MCP server process; nothing to stop. The in-process toolset goes away when the CLI process exits. Use `ruflo mcp stop` for a standalone server.',
       };
     },
   },

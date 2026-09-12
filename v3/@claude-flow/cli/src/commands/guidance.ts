@@ -3,6 +3,7 @@
  * Guidance Control Plane - compile, retrieve, enforce, optimize
  */
 
+import { existsSync } from 'node:fs';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 
@@ -43,7 +44,6 @@ const compileCommand: Command = {
 
     try {
       const { readFile } = await import('node:fs/promises');
-      const { existsSync } = await import('node:fs');
 
       if (!existsSync(rootPath)) {
         output.writeln(output.error(`Root guidance file not found: ${rootPath}`));
@@ -132,7 +132,6 @@ const retrieveCommand: Command = {
 
     try {
       const { readFile } = await import('node:fs/promises');
-      const { existsSync } = await import('node:fs');
       const { GuidanceCompiler } = await import('@claude-flow/guidance/compiler');
       const { ShardRetriever, HashEmbeddingProvider } = await import('@claude-flow/guidance/retriever');
 
@@ -302,7 +301,6 @@ const statusCommand: Command = {
     output.writeln(output.dim('─'.repeat(50)));
 
     try {
-      const { existsSync } = await import('node:fs');
 
       const rootExists = existsSync('./CLAUDE.md');
       const localExists = existsSync('./CLAUDE.local.md');
@@ -379,7 +377,6 @@ const optimizeCommand: Command = {
 
     try {
       const { readFile, writeFile } = await import('node:fs/promises');
-      const { existsSync } = await import('node:fs');
 
       if (!existsSync(rootPath)) {
         output.writeln(output.error(`Root guidance file not found: ${rootPath}`));
@@ -494,7 +491,6 @@ const abTestCommand: Command = {
 
     try {
       const { readFile } = await import('node:fs/promises');
-      const { existsSync } = await import('node:fs');
       const { abBenchmark, getDefaultABTasks } = await import('@claude-flow/guidance/analyzer');
 
       // Load Config B (candidate) content

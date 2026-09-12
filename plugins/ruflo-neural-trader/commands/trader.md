@@ -16,6 +16,7 @@ Subcommands:
 - `portfolio optimize [--risk-target <number>]` -- Optimize allocation via mean-variance
 - `live --broker <name> [--swarm enabled]` -- Start live trading with optional swarm coordination
 - `history` -- View trade history and performance summary
+- `cloud <backtest|train|sweep> <strategy-or-model> --symbol <TICKER> [--period 2020-2024] [--mc-paths 1000]` -- Run a HEAVY job (long walk-forward, big Monte-Carlo, parameter sweep, model training) on an Anthropic Managed Agent cloud container instead of locally. Needs `ANTHROPIC_API_KEY`. See the `trader-cloud-backtest` skill + ADR-117. (Cost: a cloud session bills container time + tokens until terminated — the skill installs neural-trader once, reuses the env, pre-flights cheap, terminates eagerly.)
 
 Steps by subcommand:
 

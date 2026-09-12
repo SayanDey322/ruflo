@@ -13,7 +13,7 @@ import type {
   PluginStoreConfig,
   PluginEntry,
 } from './types.js';
-import { resolveIPNS, fetchFromIPFS } from '../../transfer/ipfs/client.js';
+import { resolveIPNS, fetchFromIPFS, verifyEd25519Signature } from '../../transfer/ipfs/client.js';
 
 /**
  * Fetch real npm download stats for a package
@@ -51,10 +51,13 @@ async function fetchNpmStats(packageName: string): Promise<{ downloads: number; 
  * Default plugin store configuration
  */
 /**
- * Live IPFS Registry CID - Updated 2026-01-24
- * This is the current pinned registry on Pinata
+ * Live IPFS Registry CID - Updated 2026-05-11
+ * This is the current pinned registry on Pinata.
+ * 2026-05-11: bumped agentic-qe→3.0.0-alpha.5, gastown-bridge→0.1.4,
+ * legal-contracts/healthcare-clinical/perf-optimizer→3.0.0-alpha.2
+ * (republished to fix #1902/#1903/#1904 install breakage).
  */
-export const LIVE_REGISTRY_CID = 'QmXbfEAaR7D2Ujm4GAkbwcGZQMHqAMpwDoje4583uNP834';
+export const LIVE_REGISTRY_CID = 'QmeXmAdbWVvT84GfDXPD2Vg1HWhiTW2VdZfRLhkS96KkX2';
 
 /**
  * Pre-trained Model Registry CID - Updated 2026-01-24
@@ -175,11 +178,19 @@ export class PluginDiscoveryService {
         return this.createDemoRegistryAsync(registry);
       }
 
-      // Verify registry signature if required
-      if (this.config.requireVerification && registryData.registrySignature) {
-        const verified = this.verifyRegistrySignature(registryData, registry.publicKey);
+      // Verify registry signature when required.
+      // Fail closed on missing/invalid signature — silently warning and using
+      // an unverified registry would let a compromised IPFS gateway (or any
+      // on-path attacker) swap in attacker-mapped plugin entries that the
+      // installer would then load unsandboxed.
+      if (this.config.requireVerification) {
+        const verified = await this.verifyRegistrySignature(registryData, registry.publicKey);
         if (!verified) {
-          console.warn(`[PluginDiscovery] Registry signature verification failed`);
+          console.warn(
+            `[PluginDiscovery] Registry signature verification failed for ` +
+              `${registry.name} (CID ${cid}); falling back to demo registry.`,
+          );
+          return this.createDemoRegistryAsync(registry);
         }
       }
 
@@ -225,6 +236,9 @@ export class PluginDiscoveryService {
         { id: 'integrations', name: 'Integrations', description: 'Third-party integrations', pluginCount: 2 },
         { id: 'agents', name: 'Agents', description: 'Custom agent types', pluginCount: 1 },
         { id: 'iot', name: 'IoT', description: 'IoT device management and fleet orchestration', pluginCount: 1 },
+        // ADR-150 — MetaHarness-generated standalone harnesses
+        // surface alongside plugins. Filter via `--type harness`.
+        { id: 'harness', name: 'Harness', description: 'MetaHarness-generated standalone agent harnesses (ADR-150)', pluginCount: 0 },
       ],
       authors: [
         {
@@ -584,7 +598,7 @@ export class PluginDiscoveryService {
         name: '@claude-flow/plugin-agentic-qe',
         displayName: 'Agentic Quality Engineering',
         description: 'AI-powered quality engineering with 58 agents that write tests, find bugs, predict defects, scan security, and perform chaos engineering safely.',
-        version: '3.0.0-alpha.3',
+        version: '3.0.0-alpha.5',
         cid: 'bafybeiagenticqeplugin2024',
         size: 285000,
         checksum: 'sha256:agenticqe2024xyz',
@@ -702,7 +716,7 @@ export class PluginDiscoveryService {
         name: '@claude-flow/plugin-healthcare-clinical',
         displayName: 'Healthcare Clinical',
         description: 'HIPAA-compliant clinical workflow automation with patient data protection, medical terminology NLP, and healthcare interoperability standards.',
-        version: '0.1.0',
+        version: '3.0.0-alpha.2',
         cid: 'bafybeihealthcareplugin2024',
         size: 210000,
         checksum: 'sha256:healthcare2024xyz',
@@ -760,7 +774,7 @@ export class PluginDiscoveryService {
         name: '@claude-flow/plugin-legal-contracts',
         displayName: 'Legal Contracts',
         description: 'Attorney-client privilege aware contract analysis with clause extraction, risk identification, and compliance checking.',
-        version: '0.1.0',
+        version: '3.0.0-alpha.2',
         cid: 'bafybeilegalcontractsplugin2024',
         size: 175000,
         checksum: 'sha256:legalcontracts2024xyz',
@@ -848,7 +862,7 @@ export class PluginDiscoveryService {
         name: '@claude-flow/plugin-perf-optimizer',
         displayName: 'Performance Optimizer',
         description: 'AI-powered performance optimization with bottleneck detection, memory profiling, and automated performance tuning.',
-        version: '0.1.0',
+        version: '3.0.0-alpha.2',
         cid: 'bafybeiperfoptimizerplugin2024',
         size: 225000,
         checksum: 'sha256:perfoptimizer2024xyz',
@@ -966,7 +980,7 @@ export class PluginDiscoveryService {
         name: '@claude-flow/plugin-gastown-bridge',
         displayName: 'Gas Town Bridge',
         description: 'Gas Town orchestrator integration with WASM-accelerated formula parsing, Beads sync, convoy management, and graph analysis (352x faster).',
-        version: '0.1.0',
+        version: '0.1.4',
         cid: 'bafybeigastownbridgeplugin2024',
         size: 485000,
         checksum: 'sha256:gastownbridge2024xyz',
@@ -1194,14 +1208,34 @@ export class PluginDiscoveryService {
   }
 
   /**
-   * Verify registry signature
+   * Verify registry Ed25519 signature.
+   *
+   * Mirrors the signing scheme in scripts/publish-registry.ts: the signer
+   * removes registrySignature + registryPublicKey from the registry object
+   * and signs JSON.stringify(rest). The verifier reproduces those bytes and
+   * checks the signature against the registry config's pre-pinned
+   * publicKey — NOT registry.registryPublicKey, which is asserted by
+   * whoever served the registry and can be swapped by a compromised
+   * gateway / on-path attacker.
    */
-  private verifyRegistrySignature(registry: PluginRegistry, expectedPublicKey: string): boolean {
-    if (!registry.registrySignature || !registry.registryPublicKey) {
+  private async verifyRegistrySignature(
+    registry: PluginRegistry,
+    expectedPublicKey: string,
+  ): Promise<boolean> {
+    if (!registry.registrySignature || !expectedPublicKey) {
       return false;
     }
-    // In production: Verify Ed25519 signature
-    return registry.registryPublicKey.startsWith(expectedPublicKey.split(':')[0]);
+    // Object spread preserves insertion order; delete drops a key without
+    // re-ordering the rest, matching the signer's view of the registry.
+    const registryToVerify: Record<string, unknown> = { ...registry };
+    delete registryToVerify.registrySignature;
+    delete registryToVerify.registryPublicKey;
+    const message = JSON.stringify(registryToVerify);
+    return verifyEd25519Signature(
+      message,
+      registry.registrySignature,
+      expectedPublicKey,
+    );
   }
 
   /**

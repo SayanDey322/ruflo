@@ -338,9 +338,9 @@
 	let isFileUploadEnabled = $derived(activeMimeTypes.length > 0);
 	let focused = $state(false);
 
-	let activeRouterExamplePrompt = $state<string | null>(null);
+	let activeRouterExamplePrompt: string | null = $state(null);
 	// Use MCP examples when all base servers are enabled, otherwise use router examples
-	let activeExamples = $derived<RouterExample[]>(
+	let activeExamples: RouterExample[] = $derived(
 		$allBaseServersEnabled ? mcpExamples : routerExamples
 	);
 
@@ -431,7 +431,7 @@
 	}
 
 	// Pull tool names from the latest assistant message.
-	let lastAssistantToolNames = $derived<string[]>(() => {
+	let lastAssistantToolNames: string[] = $derived((() => {
 		for (let i = messages.length - 1; i >= 0; i--) {
 			const msg = messages[i];
 			if (msg.from !== "assistant") continue;
@@ -445,13 +445,13 @@
 			return names;
 		}
 		return [];
-	}());
+	})());
 
-	let dynamicFollowUps = $derived<RouterFollowUp[]>(
+	let dynamicFollowUps: RouterFollowUp[] = $derived(
 		dedupePrompts(lastAssistantToolNames.flatMap(followUpsForTool), 4)
 	);
 
-	let routerFollowUps = $derived<RouterFollowUp[]>(
+	let routerFollowUps: RouterFollowUp[] = $derived(
 		activeRouterExamplePrompt
 			? (activeExamples.find((ex) => ex.prompt === activeRouterExamplePrompt)?.followUps ?? [])
 			: []
@@ -459,7 +459,7 @@
 
 	// Combined: prefer static example follow-ups (curated by us); fall back to
 	// dynamic tool-derived follow-ups generated from the last assistant turn.
-	let effectiveFollowUps = $derived<RouterFollowUp[]>(
+	let effectiveFollowUps: RouterFollowUp[] = $derived(
 		routerFollowUps.length > 0 ? routerFollowUps : dynamicFollowUps
 	);
 
@@ -822,7 +822,7 @@
 									aria-label="Toggle autopilot mode"
 								>
 									<IconZap class="size-3.5" />
-									<span>{$settings.autopilotEnabled ? 'AUTO' : 'AUTO'}</span>
+									<span>{$settings.autopilotEnabled ? 'AUTO' : 'MANUAL'}</span>
 								</button>
 							{/if}
 							{#if transcriptionEnabled}

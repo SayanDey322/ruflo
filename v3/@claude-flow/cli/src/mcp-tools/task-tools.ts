@@ -70,7 +70,7 @@ function saveTaskStore(store: TaskStore): void {
 export const taskTools: MCPTool[] = [
   {
     name: 'task_create',
-    description: 'Create a new task',
+    description: 'Create a new task Use when native TodoWrite is wrong because you need cross-session task persistence, agent assignment, dependency tracking, or completion analytics in the .swarm/memory.db. For in-session checklists native TodoWrite is simpler and faster.',
     category: 'task',
     inputSchema: {
       type: 'object',
@@ -124,7 +124,7 @@ export const taskTools: MCPTool[] = [
   },
   {
     name: 'task_status',
-    description: 'Get task status',
+    description: 'Get task status Use when native TodoWrite is wrong because you need cross-session task persistence, agent assignment, dependency tracking, or completion analytics in the .swarm/memory.db. For in-session checklists native TodoWrite is simpler and faster.',
     category: 'task',
     inputSchema: {
       type: 'object',
@@ -168,7 +168,7 @@ export const taskTools: MCPTool[] = [
   },
   {
     name: 'task_list',
-    description: 'List all tasks',
+    description: 'List all tasks Use when native TodoWrite is wrong because you need cross-session task persistence, agent assignment, dependency tracking, or completion analytics in the .swarm/memory.db. For in-session checklists native TodoWrite is simpler and faster.',
     category: 'task',
     inputSchema: {
       type: 'object',
@@ -230,7 +230,7 @@ export const taskTools: MCPTool[] = [
   },
   {
     name: 'task_complete',
-    description: 'Mark task as complete',
+    description: 'Mark task as complete Use when native TodoWrite is wrong because you need cross-session task persistence, agent assignment, dependency tracking, or completion analytics in the .swarm/memory.db. For in-session checklists native TodoWrite is simpler and faster.',
     category: 'task',
     inputSchema: {
       type: 'object',
@@ -295,7 +295,7 @@ export const taskTools: MCPTool[] = [
   },
   {
     name: 'task_update',
-    description: 'Update task status or progress',
+    description: 'Update task status or progress Use when native TodoWrite is wrong because you need cross-session task persistence, agent assignment, dependency tracking, or completion analytics in the .swarm/memory.db. For in-session checklists native TodoWrite is simpler and faster.',
     category: 'task',
     inputSchema: {
       type: 'object',
@@ -350,7 +350,7 @@ export const taskTools: MCPTool[] = [
   },
   {
     name: 'task_assign',
-    description: 'Assign a task to one or more agents',
+    description: 'Assign a task to one or more agents Use when native TodoWrite is wrong because you need cross-session task persistence, agent assignment, dependency tracking, or completion analytics in the .swarm/memory.db. For in-session checklists native TodoWrite is simpler and faster.',
     category: 'task',
     inputSchema: {
       type: 'object',
@@ -438,7 +438,7 @@ export const taskTools: MCPTool[] = [
   },
   {
     name: 'task_cancel',
-    description: 'Cancel a task',
+    description: 'Cancel a task Use when native TodoWrite is wrong because you need cross-session task persistence, agent assignment, dependency tracking, or completion analytics in the .swarm/memory.db. For in-session checklists native TodoWrite is simpler and faster.',
     category: 'task',
     inputSchema: {
       type: 'object',
@@ -479,6 +479,55 @@ export const taskTools: MCPTool[] = [
         success: false,
         taskId,
         error: 'Task not found',
+      };
+    },
+  },
+  {
+    // #1916: the `ruflo task retry <id>` CLI subcommand referenced an
+    // unregistered `task_retry` tool. Re-queues a finished/cancelled task by
+    // cloning its spec into a fresh pending task (the original is left intact
+    // as history).
+    name: 'task_retry',
+    description: 'Re-queue a failed/cancelled/completed task by cloning its spec into a fresh pending task (the original record is kept as history). Use when native TodoWrite is wrong because you need the original task\'s persisted spec (type, priority, assignees, tags) and a stable taskId chain across runs rather than hand-retyping a checklist item. For ad-hoc re-runs, native TodoWrite is fine.',
+    category: 'task',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: 'ID of the task to retry' },
+        resetState: { type: 'boolean', description: 'Reset progress/result on the new task (default true)' },
+      },
+      required: ['taskId'],
+    },
+    handler: async (input) => {
+      const v = validateIdentifier(input.taskId, 'taskId');
+      if (!v.valid) return { success: false, error: v.error };
+
+      const store = loadTaskStore();
+      const taskId = input.taskId as string;
+      const original = store.tasks[taskId];
+      if (!original) return { success: false, taskId, error: 'Task not found' };
+
+      const newTaskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      store.tasks[newTaskId] = {
+        taskId: newTaskId,
+        type: original.type,
+        description: original.description,
+        priority: original.priority,
+        status: 'pending',
+        progress: 0,
+        assignedTo: [...original.assignedTo],
+        tags: [...original.tags, 'retry-of:' + taskId],
+        createdAt: new Date().toISOString(),
+        startedAt: null,
+        completedAt: null,
+      };
+      saveTaskStore(store);
+
+      return {
+        taskId,
+        newTaskId,
+        previousStatus: original.status,
+        status: 'pending',
       };
     },
   },

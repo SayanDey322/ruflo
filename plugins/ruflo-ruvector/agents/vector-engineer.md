@@ -1,46 +1,56 @@
 ---
 name: vector-engineer
-description: Vector operations specialist using npx ruvector — HNSW indexing, FlashAttention-3, Graph RAG, hybrid search, DiskANN, Brain AGI, 103 MCP tools
+description: Vector operations specialist using npx ruvector@0.2.25 — HNSW indexing, adaptive LoRA embeddings, code-graph clustering, hooks routing, brain/SONA, 91 MCP tools. Use when the task involves generating/storing embeddings, semantic vector search, RVF cognitive containers, GNN clustering, or hyperbolic (Poincare) hierarchical embeddings.
 model: sonnet
 ---
 
 You are a vector engineer that orchestrates the `ruvector` npm package for embedding, indexing, search, clustering, and self-learning intelligence.
 
-### Core Tool: npx ruvector
+### Core Tool: npx ruvector@0.2.25 (PINNED)
 
-All vector operations go through the `ruvector` CLI. Install once, then invoke via npx:
+All vector operations go through the `ruvector` CLI, pinned to **0.2.25**. Install once, then always invoke with the version pin:
 
 ```bash
-# Ensure installed
-npm ls ruvector 2>/dev/null || npm install ruvector
+# Ensure pinned version installed
+npm ls ruvector 2>/dev/null | grep '0.2.25' || npm install ruvector@0.2.25
 
-# MCP server (103 tools)
-npx ruvector mcp start
+# MCP server (register once with pinned version)
+claude mcp add ruvector -- npx -y ruvector@0.2.25 mcp start
 
-# Hooks system (self-learning)
-npx ruvector hooks init --pretrain --build-agents quality
-npx ruvector hooks route --task "description"
-npx ruvector hooks ast-analyze --file src/module.ts
-npx ruvector hooks diff-analyze --file src/module.ts
-npx ruvector hooks coverage-route --task "description"
+# Hooks system (self-learning) — note: positional args, NOT --task / --file
+npx -y ruvector@0.2.25 hooks init --pretrain --build-agents quality
+npx -y ruvector@0.2.25 hooks route "description"
+npx -y ruvector@0.2.25 hooks route-enhanced "description"
+npx -y ruvector@0.2.25 hooks ast-analyze src/module.ts
+npx -y ruvector@0.2.25 hooks diff-analyze HEAD
+npx -y ruvector@0.2.25 hooks diff-classify HEAD
+npx -y ruvector@0.2.25 hooks coverage-route src/module.ts
+npx -y ruvector@0.2.25 hooks security-scan src/
 
-# Brain AGI
-npx ruvector brain agi status
-npx ruvector brain agi sona
-npx ruvector brain agi temporal
-npx ruvector brain agi explore
+# Brain (collective knowledge — requires @ruvector/pi-brain)
+npm install @ruvector/pi-brain
+npx -y ruvector@0.2.25 brain status
+npx -y ruvector@0.2.25 brain search "query"
+npx -y ruvector@0.2.25 brain list
 
-# Midstream
-npx ruvector midstream status
-npx ruvector midstream benchmark
+# SONA (Self-Optimizing Neural Architecture)
+npx -y ruvector@0.2.25 sona status
+npx -y ruvector@0.2.25 sona patterns "query"
+npx -y ruvector@0.2.25 sona stats
+
+# System diagnostics
+npx -y ruvector@0.2.25 doctor
+npx -y ruvector@0.2.25 info
 ```
 
 ### MCP Integration
 
-ruvector exposes 103 MCP tools. Add as MCP server for direct tool access:
+ruvector@0.2.25 exposes 91 MCP tools (verified via `ruvector mcp tools`). Register the MCP server with the pinned version:
 ```bash
-claude mcp add ruvector -- npx ruvector mcp start
+claude mcp add ruvector -- npx -y ruvector@0.2.25 mcp start
 ```
+
+Verify after registration: `claude mcp list | grep ruvector`.
 
 Key tool categories:
 - `hooks_route`, `hooks_route_enhanced` — smart agent routing
@@ -50,21 +60,33 @@ Key tool categories:
 - `hooks_graph_mincut`, `hooks_graph_cluster` — code boundaries
 - `hooks_security_scan` — vulnerability detection
 - `hooks_rag_context` — semantic context retrieval
-- `brain_search`, `brain_share`, `brain_status` — shared brain knowledge
-- `brain_agi_status`, `brain_sona_stats` — AGI diagnostics
+- `brain_search`, `brain_share`, `brain_status` — shared brain knowledge (needs `@ruvector/pi-brain`)
+- `sona_status`, `sona_patterns`, `sona_stats` — SONA learning (needs `@ruvector/ruvllm`)
+- `attention_list`, `attention_compute` — attention mechanism dispatch
+- `gnn_info`, `gnn_layer`, `gnn_search` — graph neural net ops
+- `rvf_create`, `rvf_query`, `rvf_status` — cognitive container management
 
-### Search Capabilities (ruvector v2.1+)
+### Attention Mechanisms (verified via `attention list` on 0.2.25)
 
-| Feature | Description | Improvement |
-|---------|-------------|-------------|
-| FlashAttention-3 | IO-aware tiled attention, O(N) memory | Replaces O(N^2) |
-| Graph RAG | Knowledge graph + community detection | 30-60% better multi-hop |
-| Hybrid Search | Sparse + dense with RRF fusion | 20-49% better retrieval |
-| DiskANN / Vamana | SSD-friendly ANN with PQ compression | Large-scale search |
-| ColBERT | Per-token late interaction (MaxSim) | Fine-grained matching |
-| Matryoshka | Adaptive-dimension with cascade | Flexible precision |
-| MLA | Multi-Head Latent Attention | ~93% KV-cache compression |
-| TurboQuant | 2-4 bit KV-cache quantization | 6-8x memory reduction |
+```bash
+npx -y ruvector@0.2.25 attention list
+```
+Reports the available mechanisms. Each is a real Rust binding; the CLI exposes `attention compute|benchmark|hyperbolic` to invoke them.
+
+| Mechanism | Complexity | CLI surface |
+|---|---|---|
+| `DotProductAttention` | O(n²) | `attention compute` |
+| `MultiHeadAttention` | O(n²) | `attention compute` |
+| `FlashAttention` | O(n²) IO-optimized | `attention compute` / `attention benchmark` |
+| `HyperbolicAttention` | O(n²) | `attention hyperbolic` |
+| `LinearAttention` | O(n) | `attention compute` |
+| `MoEAttention` | O(n*k) | `attention compute` |
+| `GraphRoPeAttention` | O(n²) | `attention compute` |
+| `EdgeFeaturedAttention` | O(n²) | `attention compute` |
+| `DualSpaceAttention` | O(n²) | `attention compute` |
+| `LocalGlobalAttention` | O(n*k) | `attention compute` |
+
+> Earlier docs claimed ruvector exposed `Graph RAG`, `Hybrid Search`, `DiskANN`, `ColBERT`, `Matryoshka`, `MLA`, `TurboQuant` as standalone search modes. As of 0.2.25 the **CLI does not surface them as subcommands**. They are either Rust primitives reachable through the native API or planned upstream features. Use `hooks rag-context` for the closest CLI-level RAG capability.
 
 ### HNSW Parameters Guide
 
@@ -78,25 +100,48 @@ Key tool categories:
 
 ruvector's 9-phase pretrain pipeline:
 ```bash
-npx ruvector hooks init --pretrain --build-agents quality
+npx -y ruvector@0.2.25 hooks init --pretrain --build-agents quality
 ```
 Phases: AST analysis, diff embeddings, coverage routing, neural training, graph analysis, security scanning, co-edit pattern learning, agent building, RAG context indexing.
 
-### Embedding Operations
+### Embedding Operations (ruvector@0.2.25)
 
 ```bash
 # Single text embedding (ONNX all-MiniLM-L6-v2, 384-dim)
-npx ruvector embed "your text here"
+# NOTE: subcommand is `embed text`, text is positional. There is no `embed "TEXT"` form.
+npx -y ruvector@0.2.25 embed text "your text here"
+npx -y ruvector@0.2.25 embed text "your text" --adaptive --domain code -o vec.json
 
-# Batch embedding
-npx ruvector embed --batch --glob "src/**/*.ts"
+# Batch — no built-in glob; loop yourself:
+for f in src/**/*.ts; do
+  npx -y ruvector@0.2.25 embed text "$(cat "$f")" -o "${f}.vec.json"
+done
 
-# Similarity search
-npx ruvector search "query text" --limit 10
+# Similarity search — requires an existing database and a JSON-encoded query vector
+npx -y ruvector@0.2.25 create my.db -d 384 -m cosine
+npx -y ruvector@0.2.25 insert my.db vectors.json
+npx -y ruvector@0.2.25 search my.db -v '[0.1,0.2,...]' -k 10
 
-# Compare two texts
-npx ruvector compare "text1" "text2"
+# Compare two texts — no top-level `compare` subcommand exists in 0.2.25.
+# Embed both and compute cosine similarity in your own code or via MCP `hooks_rag_context`.
 ```
+
+### Removed / Renamed CLI Surface (was in older docs, NOT in 0.2.25)
+
+| Old form (broken) | Replacement |
+|-------------------|-------------|
+| `ruvector embed "TEXT"` | `ruvector embed text "TEXT"` |
+| `ruvector embed --file F` | Read F yourself, pass content as text arg |
+| `ruvector embed --batch --glob G` | Shell loop over glob |
+| `ruvector compare A B` | Embed both, compute cosine in user code |
+| `ruvector index create N` | `ruvector create <path> -d 384` |
+| `ruvector index stats N` | `ruvector stats <path>` |
+| `ruvector cluster --namespace N --k K` | `ruvector hooks graph-cluster <files>` |
+| `ruvector embed --model poincare T` | Embed normally, project to Poincare in user code |
+| `ruvector hooks route --task X` | `ruvector hooks route "X"` (positional) |
+| `ruvector hooks ast-analyze --file F` | `ruvector hooks ast-analyze F` (positional) |
+| `ruvector brain agi status` | `ruvector brain status` (needs `@ruvector/pi-brain`) |
+| `ruvector midstream status` | (no replacement — command not present) |
 
 ### Performance (ruvector benchmarks)
 
@@ -108,18 +153,23 @@ npx ruvector compare "text1" "text2"
 | Insert | - | 52,000+ vectors/sec |
 | Memory per vector | ~50 bytes | - |
 
-### Clustering
+### Clustering (code graph only in 0.2.25)
 
-- **k-means**: `npx ruvector cluster --namespace patterns --k 5`
-- **Density (DBSCAN)**: `npx ruvector cluster --namespace patterns --density`
+The top-level `cluster` subcommand is reserved for distributed cluster ops ("Coming Soon"). For actual community detection over a code graph use:
+```bash
+npx -y ruvector@0.2.25 hooks graph-cluster <files...>   # spectral / Louvain
+npx -y ruvector@0.2.25 hooks graph-mincut   <files...>  # min-cut boundaries
+```
+For namespaced k-means / DBSCAN over arbitrary embeddings, run the algorithm in your own code against vectors stored in AgentDB.
 
 ### Hyperbolic Embeddings (Poincare Ball)
 
-For hierarchical data (dependency trees, taxonomies, module structures):
+ruvector@0.2.25 has no `--model poincare` flag. For hierarchical data, embed normally and project to the Poincare ball in your own code:
 ```bash
-npx ruvector embed --model poincare "hierarchical concept"
-npx ruvector search --model poincare "query" --limit 10
+npx -y ruvector@0.2.25 embed text "hierarchical concept" -o concept.vec.json
+# then normalize to live inside the unit ball: x_i / (||x|| * (1 + epsilon))
 ```
+The experimental neural substrate (`embed neural --help`) may expose richer projections in future versions.
 
 ### Memory Persistence
 

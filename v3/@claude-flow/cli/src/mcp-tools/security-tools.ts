@@ -27,6 +27,21 @@ let aidefenceInstance: AIDefenceInstance | null = null;
 // Track if we've attempted install this session
 let installAttempted = false;
 
+// ADR-093 follow-up: wrapper-level counters for the lightweight aidefence
+// tools (has_pii, is_safe, scan-quick) that bypass the package's own
+// stats tracking. The audit flagged that aidefence_stats stayed at zero
+// regardless of detections from these paths. Stats now combine the
+// underlying defender.getStats() with our wrapper counters so the user
+// sees a true reflection of how often each tool category fired.
+const wrapperStats = {
+  hasPiiCalls: 0,
+  hasPiiHits: 0,
+  isSafeCalls: 0,
+  isSafeUnsafeVerdicts: 0,
+  quickScanCalls: 0,
+  quickScanThreats: 0,
+};
+
 /**
  * Get or create AIDefence instance (throws if unavailable)
  */
@@ -69,7 +84,27 @@ async function getAIDefence(): Promise<AIDefenceInstance> {
     throw new Error('AIDefence package not available. Install with: npm install @claude-flow/aidefence');
   }
 
-  // Retry with ESM cache busting via file:// URL + timestamp
+  // #1807 — auto-install lands the package somewhere Node's standard
+  // resolver couldn't find on the FIRST attempt (npm-global installs are
+  // a common offender). Try Node's resolver again first (it may have
+  // picked up the new node_modules directory), then fall back to the
+  // file:// + cache-bust import dance, then surface a clearly actionable
+  // error if everything still fails.
+  // Plain re-import (covers project-local installs that landed where Node
+  // looks). This often succeeds where the first attempt failed because
+  // the module cache is stable across the await boundary.
+  try {
+    const aidefence = await import(packageName);
+    const instance = aidefence.createAIDefence({ enableLearning: true });
+    if (instance) {
+      aidefenceInstance = instance;
+      console.error(`[claude-flow] ${packageName} loaded after install (resolver path)`);
+      return instance;
+    }
+  } catch { /* fall through to file:// attempt */ }
+
+  // file:// + cache-bust attempt (covers globally-installed packages whose
+  // path the standard resolver missed but require.resolve can locate).
   try {
     const modulePath = require.resolve(packageName);
     const cacheBust = `?t=${Date.now()}`;
@@ -79,10 +114,17 @@ async function getAIDefence(): Promise<AIDefenceInstance> {
       throw new Error('createAIDefence returned null after install');
     }
     aidefenceInstance = instance;
-    console.error(`[claude-flow] ${packageName} loaded successfully after install`);
+    console.error(`[claude-flow] ${packageName} loaded after install (file:// path)`);
     return instance;
   } catch (retryError) {
-    throw new Error(`AIDefence installed but failed to load: ${retryError}. Try restarting the MCP server.`);
+    throw new Error(
+      `AIDefence installed but failed to load: ${retryError}.\n` +
+      `This usually means npm installed the package somewhere Node's module resolver doesn't search ` +
+      `(common with global installs of \`claude-flow\`). Recovery options:\n` +
+      `  1. Run \`npm install --save @claude-flow/aidefence\` in your project's working directory.\n` +
+      `  2. Or run \`npx ruflo@latest mcp start\` from a directory whose node_modules contains the package.\n` +
+      `  3. Or restart the MCP server after the install completes.`
+    );
   }
 }
 
@@ -91,7 +133,7 @@ async function getAIDefence(): Promise<AIDefenceInstance> {
  */
 const aidefenceScanTool: MCPTool = {
   name: 'aidefence_scan',
-  description: 'Scan input text for AI manipulation threats (prompt injection, jailbreaks, PII). Returns threat assessment with <10ms latency.',
+  description: 'Scan input text for AI manipulation threats (prompt injection, jailbreaks, PII). Returns threat assessment with <10ms latency. Use when nothing native exists — Claude Code does not have a PII / prompt-injection / adversarial-text scanner. Pair with any tool that ingests untrusted input (browser scrape, federation envelope, memory_import_claude).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -117,13 +159,23 @@ const aidefenceScanTool: MCPTool = {
 
       if (quick) {
         const result = defender.quickScan(input);
+        // Audit-flagged: quickScan focuses on prompt-injection/jailbreak
+        // patterns and missed obvious PII (email + API key). Layer a fast
+        // PII check so quick mode catches both threat classes.
+        let piiPresent = false;
+        try { piiPresent = !!defender.hasPII(input); } catch { /* hasPII unavailable */ }
+        const threatDetected = result.threat || piiPresent;
+        wrapperStats.quickScanCalls++;
+        if (threatDetected) wrapperStats.quickScanThreats++;
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
-              safe: !result.threat,
-              threatDetected: result.threat,
+              safe: !threatDetected,
+              threatDetected,
               confidence: result.confidence,
+              piiDetected: piiPresent,
+              promptInjectionDetected: result.threat,
               mode: 'quick',
             }, null, 2),
           }],
@@ -164,7 +216,7 @@ const aidefenceScanTool: MCPTool = {
  */
 const aidefenceAnalyzeTool: MCPTool = {
   name: 'aidefence_analyze',
-  description: 'Deep analysis of input for specific threat types with similar pattern search and mitigation recommendations.',
+  description: 'Deep analysis of input for specific threat types with similar pattern search and mitigation recommendations. Use when nothing native exists — Claude Code does not have a PII / prompt-injection / adversarial-text scanner. Pair with any tool that ingests untrusted input (browser scrape, federation envelope, memory_import_claude).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -250,7 +302,7 @@ const aidefenceAnalyzeTool: MCPTool = {
  */
 const aidefenceStatsTool: MCPTool = {
   name: 'aidefence_stats',
-  description: 'Get AIDefence detection and learning statistics.',
+  description: 'Get AIDefence detection and learning statistics. Use when nothing native exists — Claude Code does not have a PII / prompt-injection / adversarial-text scanner. Pair with any tool that ingests untrusted input (browser scrape, federation envelope, memory_import_claude).',
   inputSchema: {
     type: 'object',
     properties: {},
@@ -264,11 +316,24 @@ const aidefenceStatsTool: MCPTool = {
         content: [{
           type: 'text',
           text: JSON.stringify({
+            // Underlying defender stats (from full detect() calls via aidefence_scan/aidefence_analyze)
             detectionCount: stats.detectionCount,
             avgDetectionTimeMs: stats.avgDetectionTimeMs,
             learnedPatterns: stats.learnedPatterns,
             mitigationStrategies: stats.mitigationStrategies,
             avgMitigationEffectiveness: stats.avgMitigationEffectiveness,
+            // ADR-093 follow-up: wrapper-level stats for the lightweight
+            // tools that bypass the defender's own counters. Audit found
+            // these stayed at 0 even after has_pii/is_safe/scan-quick
+            // calls — these counters surface real activity.
+            wrapper: {
+              hasPiiCalls: wrapperStats.hasPiiCalls,
+              hasPiiHits: wrapperStats.hasPiiHits,
+              isSafeCalls: wrapperStats.isSafeCalls,
+              isSafeUnsafeVerdicts: wrapperStats.isSafeUnsafeVerdicts,
+              quickScanCalls: wrapperStats.quickScanCalls,
+              quickScanThreats: wrapperStats.quickScanThreats,
+            },
           }, null, 2),
         }],
       };
@@ -289,7 +354,7 @@ const aidefenceStatsTool: MCPTool = {
  */
 const aidefenceLearnTool: MCPTool = {
   name: 'aidefence_learn',
-  description: 'Record detection feedback for pattern learning. Improves future detection accuracy.',
+  description: 'Record detection feedback for pattern learning. Improves future detection accuracy. Use when nothing native exists — Claude Code does not have a PII / prompt-injection / adversarial-text scanner. Pair with any tool that ingests untrusted input (browser scrape, federation envelope, memory_import_claude).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -384,7 +449,7 @@ const aidefenceLearnTool: MCPTool = {
  */
 const aidefenceIsSafeTool: MCPTool = {
   name: 'aidefence_is_safe',
-  description: 'Quick boolean check if input is safe. Fastest option for simple validation.',
+  description: 'Quick boolean check if input is safe. Fastest option for simple validation. Use when nothing native exists — Claude Code does not have a PII / prompt-injection / adversarial-text scanner. Pair with any tool that ingests untrusted input (browser scrape, federation envelope, memory_import_claude).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -400,13 +465,26 @@ const aidefenceIsSafeTool: MCPTool = {
     const input = args.input as string;
 
     try {
+      // Route through the singleton so wrapper stats track this call,
+      // and so a single defender controls both the prompt-injection model
+      // and the PII detector.
+      const defender = await getAIDefence();
       const { isSafe } = await import('@claude-flow/aidefence');
-      const safe = isSafe(input);
+      const promptSafe = isSafe(input);
+      let piiPresent = false;
+      try { piiPresent = !!defender.hasPII(input); } catch { /* hasPII unavailable */ }
+      const safe = promptSafe && !piiPresent;
+      wrapperStats.isSafeCalls++;
+      if (!safe) wrapperStats.isSafeUnsafeVerdicts++;
 
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({ safe }, null, 2),
+          text: JSON.stringify({
+            safe,
+            promptSafe,
+            piiPresent,
+          }, null, 2),
         }],
       };
     } catch (error) {
@@ -426,7 +504,7 @@ const aidefenceIsSafeTool: MCPTool = {
  */
 const aidefenceHasPIITool: MCPTool = {
   name: 'aidefence_has_pii',
-  description: 'Check if input contains PII (emails, SSNs, API keys, passwords, etc.).',
+  description: 'Check if input contains PII (emails, SSNs, API keys, passwords, etc.). Use when nothing native exists — Claude Code does not have a PII / prompt-injection / adversarial-text scanner. Pair with any tool that ingests untrusted input (browser scrape, federation envelope, memory_import_claude).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -444,6 +522,8 @@ const aidefenceHasPIITool: MCPTool = {
     try {
       const defender = await getAIDefence();
       const hasPII = defender.hasPII(input);
+      wrapperStats.hasPiiCalls++;
+      if (hasPII) wrapperStats.hasPiiHits++;
 
       return {
         content: [{

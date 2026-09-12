@@ -61,6 +61,15 @@ const CLAIMS_FOR_MESSAGE_TYPE: Record<FederationMessageType, FederationClaimType
   'handshake-accept': ['federation:connect'],
   'handshake-reject': ['federation:connect'],
   'session-terminate': ['federation:connect'],
+  // ADR-101 Component C — federated claims operations.
+  // claim-event: broadcasts a ClaimDomainEvent (state mutation across peers),
+  // same authorization shape as task-assignment.
+  'claim-event': ['federation:write'],
+  // agent-handoff: transfers claim ownership to a remote agent. Requires
+  // both the write capability (state mutation) AND spawn-lifecycle authority
+  // (handoff is a sibling of agent-spawn — both reshape who owns work).
+  // Matches the consensus-gated security posture in ADR-101.
+  'agent-handoff': ['federation:write', 'federation:spawn'],
 };
 
 export interface PolicyEngineDeps {

@@ -60,7 +60,7 @@ claude $(ls -d plugins/ruflo-*/ | sed 's|^|--plugin-dir |' | tr '\n' ' ')
 | [ruflo-jujutsu](ruflo-jujutsu/) | Diff analysis, risk scoring, reviewer recommendations |
 | [ruflo-docs](ruflo-docs/) | Doc generation, drift detection, API docs |
 | [ruflo-ruvllm](ruflo-ruvllm/) | Local LLM inference, MicroLoRA, chat formatting |
-| [ruflo-wasm](ruflo-wasm/) | WASM agent sandboxing and gallery |
+| [ruflo-agent](ruflo-agent/) | WASM agent sandboxing and gallery |
 | [ruflo-plugin-creator](ruflo-plugin-creator/) | Scaffold and validate new plugins |
 | [ruflo-migrations](ruflo-migrations/) | Database schema migration management |
 | [ruflo-observability](ruflo-observability/) | Structured logging, tracing, metrics correlation |
@@ -134,6 +134,21 @@ Or manually: copy any existing plugin directory and modify.
 ```bash
 claude plugin validate plugins/ruflo-<name>
 ```
+
+## Verification & Discoverability
+
+Every MCP tool description across the 32 plugins must answer "use this over native (Bash/Read/Grep/Glob/Task/TodoWrite) when?" per [ADR-112](../v3/docs/adr/ADR-112-mcp-tool-discoverability.md). The rule is enforced by CI:
+
+```bash
+# Run the audit (scans all MCPTool definitions across all plugins)
+node scripts/audit-tool-descriptions.mjs
+
+# Gates: every description must include "Use when …" guidance,
+# be ≥ 80 chars, and be unique. Baseline at verification/mcp-tool-baseline.json
+# is monotone-decreasing — CI fails on any regression.
+```
+
+Combined with [`verification/`](../verification/) (Ed25519-signed witness manifest, 103+ documented fixes attested), the plugin surface is regression-protected at three layers: install smoke (`npm i`), behavioral smoke (paired-tool round-trips), and presence attestation (every load-bearing line of every documented fix). See [`verification/README.md`](../verification/README.md) for the full stack.
 
 ## License
 

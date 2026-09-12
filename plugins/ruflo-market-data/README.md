@@ -59,8 +59,36 @@ market compare <sym1> <sym2>             # Compare pattern profiles between symb
 
 Each pattern is encoded as a 64-dimension padded vector for HNSW indexing.
 
+## Compatibility
+
+- **CLI:** pinned to `@claude-flow/cli` v3.6 major+minor.
+- **Verification:** `bash plugins/ruflo-market-data/scripts/smoke.sh` is the contract.
+
+## Namespace coordination
+
+This plugin owns two AgentDB namespaces (kebab-case, follows the convention from [ruflo-agentdb ADR-0001 §"Namespace convention"](../ruflo-agentdb/docs/adrs/0001-agentdb-optimization.md)):
+
+- `market-data` — normalized OHLCV vectors per symbol+date
+- `market-patterns` — detected candlestick patterns with reliability scores
+
+Both accessed via `memory_*` (namespace-routed). Reserved namespaces (`pattern`, `claude-memories`, `default`) MUST NOT be shadowed.
+
+> **Routing note:** Earlier versions of these skills used `agentdb_hierarchical-*` and `agentdb_pattern-*` with namespace arguments — those tool families route by tier/ReasoningBank and ignore namespace strings. ADR-0001 fixed the skills to use `memory_*` for namespaced reads/writes.
+
+## Verification
+
+```bash
+bash plugins/ruflo-market-data/scripts/smoke.sh
+# Expected: "11 passed, 0 failed"
+```
+
+## Architecture Decisions
+
+- [`ADR-0001` — ruflo-market-data plugin contract (3 functional bug fixes + namespace coordination + smoke as contract)](./docs/adrs/0001-market-data-contract.md)
+
 ## Related Plugins
 
+- `ruflo-agentdb` — namespace convention owner; defines the routing rules ADR-0001 fixes violations of
 - `ruflo-neural-trader` -- Consumes market patterns as strategy signals
 - `ruflo-ruvector` -- HNSW indexing engine for pattern similarity search
 - `ruflo-observability` -- Data feed health and ingestion latency dashboards

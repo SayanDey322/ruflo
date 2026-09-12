@@ -495,12 +495,67 @@ export class GNNBridge implements IGNNBridge {
   }
 
   /**
-   * Extract imports from file (simplified)
+   * Extract imports from file. Returns the subset of `allFiles` that this
+   * file imports via relative specifiers — used to build edges in the
+   * dependency graph. #1554/#1553: previously returned `[]` which produced
+   * graphs with zero edges and broke architecture-analyze, refactor-impact,
+   * and split-suggest. Regex-based (no AST parser dep) — handles `import …
+   * from`, `export … from`, and `require('…')` for relative paths only.
    */
-  private async extractImports(_file: string, _allFiles: string[]): Promise<string[]> {
-    // In production, would parse AST
-    // For now, return empty array
-    return [];
+  private async extractImports(file: string, allFiles: string[]): Promise<string[]> {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+
+    let content: string;
+    try {
+      content = fs.readFileSync(file, 'utf-8');
+    } catch {
+      return [];
+    }
+
+    const allFilesSet = new Set(allFiles.map((f) => path.resolve(f)));
+    const exts = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
+    const baseDir = path.dirname(path.resolve(file));
+    const out = new Set<string>();
+
+    const importRx = /^\s*(?:import\s+[^'"]+from\s+|import\s+|export\s+\*?\s*from\s+|export\s+\{[^}]*\}\s+from\s+)['"]([^'"]+)['"]|^\s*(?:const|let|var)\s+[^=]+=\s*require\(\s*['"]([^'"]+)['"]\s*\)/gm;
+    let m: RegExpExecArray | null;
+    while ((m = importRx.exec(content)) !== null) {
+      const spec = m[1] ?? m[2];
+      if (!spec) continue;
+      // Only resolve relative/absolute paths — node_modules imports aren't
+      // graph nodes here.
+      if (!spec.startsWith('./') && !spec.startsWith('../') && !spec.startsWith('/')) continue;
+
+      const candidates: string[] = [];
+      const base = spec.startsWith('/') ? spec : path.resolve(baseDir, spec);
+      // Try the bare path, each extension, and `index.<ext>` under a directory.
+      candidates.push(base);
+      for (const e of exts) {
+        candidates.push(base + e);
+        candidates.push(path.join(base, `index${e}`));
+      }
+      // TS module-specifier convention: imports use `.js` even when the
+      // actual source is `.ts`/`.tsx`. Strip a trailing `.js`/`.cjs`/`.mjs`
+      // and re-try with TS extensions so source-level edges resolve.
+      const jsLikeMatch = base.match(/^(.+)\.(js|cjs|mjs)$/);
+      if (jsLikeMatch && jsLikeMatch[1]) {
+        const stripped = jsLikeMatch[1];
+        for (const e of ['.ts', '.tsx', '.js', '.jsx']) {
+          candidates.push(stripped + e);
+          candidates.push(path.join(stripped, `index${e}`));
+        }
+      }
+      for (const c of candidates) {
+        const resolved = path.resolve(c);
+        if (allFilesSet.has(resolved)) {
+          out.add(resolved);
+          break;
+        }
+      }
+    }
+
+    return Array.from(out);
   }
 
   /**

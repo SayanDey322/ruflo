@@ -5,6 +5,14 @@
  * Created with ❤️ by ruv.io
  */
 
+// MUST be the first import — installs console filter for the cosmetic
+// "[AgentDB Patch] Controller index not found" warning before any
+// agentic-flow / agentdb code can load. ES module imports are evaluated
+// in source order, so this file runs its side effects before any other
+// import in this module's import graph (including transitive imports of
+// agentic-flow via commands/index.js).
+import './log-filters.js';
+
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -75,6 +83,22 @@ export class CLI {
    */
   async run(args: string[] = process.argv.slice(2)): Promise<void> {
     try {
+      // #1791.2 — If the user invoked a lazy command (e.g. `hive-mind task`),
+      // pre-load it BEFORE parsing so the parser can build scoped flag
+      // aliases for its subcommands. Without this, short flags defined on
+      // the lazy command's subcommand options (`-d` for description, etc.)
+      // never get into the alias map and silently fall through to global
+      // resolution — the user sees `[ERROR] Task description is required`
+      // even though they passed `-d "smoke"`.
+      for (const arg of args) {
+        if (arg.startsWith('-')) continue;
+        if (this.parser.isLazyOnly(arg)) {
+          const cmd = await getCommandAsync(arg);
+          if (cmd) this.parser.registerCommand(cmd);
+        }
+        break; // only the first non-flag positional is the command name
+      }
+
       // Parse arguments
       const parseResult = this.parser.parse(args);
       const { command: commandPath, flags, positional } = parseResult;
@@ -109,6 +133,94 @@ export class CLI {
         this.checkForUpdatesOnStartup().catch(() => {/* silent */});
       }
 
+      // Version-stamped helper auto-refresh — propagate hook fixes to an already
+      // initialized project without a manual re-init. Skip for init/upgrade
+      // (they refresh explicitly). AWAITED (not fire-and-forget) so a fast
+      // command can't exit before the copy lands; the fast path is a single
+      // stamp read + string compare (sub-ms), and the copy runs at most once per
+      // version bump. Best-effort + silent — never blocks or fails a command.
+      if (commandPath[0] !== 'init' && commandPath[0] !== 'update') {
+        // ADR-324: existing installations acquire a versioned policy state on
+        // first use. Migration is additive and starts in legacy mode, so older
+        // AgentDB, MCP, hooks, and swarm workflows keep their exact behavior.
+        try {
+          const { autoMigratePolicyStateIfNeeded } = await import('./services/policy-runtime.js');
+          const migration = await autoMigratePolicyStateIfNeeded(process.cwd());
+          if (migration.migrated && this.output.isVerbose()) {
+            this.output.printDebug(`Initialized agentic policy compatibility state (${migration.mode})`);
+          }
+        } catch (error) {
+          // Legacy compatibility requires startup to remain available if the
+          // policy state cannot be initialized. Enforce-mode actions still
+          // fail at their authoritative dispatcher when state is unreadable.
+          if (this.output.isVerbose()) {
+            this.output.printDebug(`Policy compatibility migration skipped: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+
+        try {
+          const { autoRefreshHelpersIfStale } = await import('./init/helper-refresh.js');
+          // alsoRefreshGlobal:true — refresh ~/.claude/helpers too, not just
+          // <cwd>/.claude/helpers. Fixes the "promo row missing on remote
+          // installs" bug where Claude Code's global settings.json falls back
+          // to ~/.claude/helpers/statusline.cjs (executor.ts:460-462) and that
+          // file was frozen at whatever version was current when the user
+          // last ran `ruflo init` — pre-3.31.3 nothing refreshed it, so any
+          // helpers change (e.g. the 2026-07-13 Line-3 funnel row addition)
+          // never reached existing installs. Same forward-only semver.gte
+          // guard applies to the global pass.
+          const r = await autoRefreshHelpersIfStale(process.cwd(), { alsoRefreshGlobal: true });
+          if (r.blocked) {
+            // Integrity failure = potential on-disk tampering of hook code. Warn
+            // loudly (not silent) — the existing project helpers were left intact.
+            this.output.printWarning(`Skipped helper auto-refresh — ${r.blocked}. Reinstall @claude-flow/cli from a trusted source.`);
+          } else if (r.refreshed && this.output.isVerbose()) {
+            this.output.printDebug(`Refreshed .claude/helpers (${r.from} → ${r.to})`);
+          }
+          if (r.global?.refreshed && this.output.isVerbose()) {
+            this.output.printDebug(`Refreshed ~/.claude/helpers (${r.global.from} → ${r.global.to})`);
+          } else if (r.global?.blocked && r.global.blocked !== r.blocked) {
+            this.output.printWarning(`Skipped ~/.claude/helpers auto-refresh — ${r.global.blocked}.`);
+          }
+        } catch { /* silent */ }
+
+        // ADR-177: adopt a signed proven-configuration champion if the package
+        // ships one newer than this project's stamp AND it is authentic +
+        // suitable for this environment. Sibling of the helper channel above —
+        // its own stamp + trust root; additive no-op when no champion ships.
+        try {
+          const { autoAdoptProvenConfigIfStale } = await import('./config/proven-config-refresh.js');
+          const a = await autoAdoptProvenConfigIfStale(process.cwd());
+          if (a.adopted && this.output.isVerbose()) {
+            this.output.printDebug(`Adopted proven config (${a.from} → ${a.to})`);
+          }
+          // Close the loop (ADR-176 phase 9): promote the adopted champion to the
+          // ACTIVE policy that consumers (neural_patterns retrieval, …) read. A
+          // no-op if nothing is adopted or it is already active; reversible.
+          const { applyChampion } = await import('./config/harness-feedback-applier.js');
+          const ap = applyChampion(process.cwd());
+          if (ap.applied && this.output.isVerbose()) {
+            this.output.printDebug(`Applied proven config to active policy (${ap.from ?? '(none)'} → ${ap.to})`);
+          }
+        } catch { /* silent */ }
+
+        // Self-running daemon: ensure the background workers (distillation,
+        // backup, …) are actually firing without a manual `daemon start`.
+        // Single-instance (only spawns when none is alive; the spawned daemon
+        // re-checks its own lock), bounded (TTL/idle self-shutdown), opt-out via
+        // RUFLO_DAEMON_AUTOSTART=0. Skipped for `daemon` (no recursion). Detached
+        // + fire-and-forget, so it never blocks the command.
+        if (commandPath[0] !== 'daemon') {
+          try {
+            const { ensureDaemonRunning } = await import('./services/daemon-autostart.js');
+            const d = ensureDaemonRunning(process.cwd());
+            if (d.started) {
+              this.output.printInfo(`Started Ruflo background daemon for ${process.cwd()} (stop: ruflo daemon stop)`);
+            }
+          } catch { /* silent */ }
+        }
+      }
+
       // Handle lazy-loaded commands that weren't recognized by the parser
       // If commandPath is empty but positional has a command name, check if it's lazy-loadable
       if (commandPath.length === 0 && positional.length > 0 && !positional[0].startsWith('-')) {
@@ -123,8 +235,10 @@ export class CLI {
       // No command - show help or suggest correction
       if (commandPath.length === 0 || flags.help || flags.h) {
         if (commandPath.length > 0) {
-          // Show command-specific help
-          await this.showCommandHelp(commandPath[0]);
+          // #1791.4 — pass the FULL command path so subcommands like
+          // `hive-mind spawn --help` render spawn's own options/examples
+          // instead of falling back to the parent's SUBCOMMANDS list.
+          await this.showCommandHelp(commandPath);
         } else if (positional.length > 0 && !positional[0].startsWith('-')) {
           // First positional looks like an attempted command - suggest correction
           const attemptedCommand = positional[0];
@@ -249,8 +363,8 @@ export class CLI {
           process.exit(result.exitCode || 1);
         }
       } else {
-        // No action - show command help
-        this.showCommandHelp(commandName);
+        // No action - show command help (full path so nested subcommands work)
+        await this.showCommandHelp(commandPath);
       }
     } catch (error) {
       // Don't re-handle if this is a process.exit error (from mocked tests)
@@ -363,29 +477,55 @@ export class CLI {
   }
 
   /**
-   * Show command-specific help
+   * Show command-specific help.
+   *
+   * #1791.4 — accepts a FULL command path (e.g. ['hive-mind', 'spawn']) and
+   * walks subcommands so nested invocations show the leaf's own options /
+   * examples instead of always rendering the parent's SUBCOMMANDS list.
    */
-  private async showCommandHelp(commandName: string): Promise<void> {
-    // Try sync first, then lazy load
-    let command = getCommand(commandName);
-    if (!command && hasCommand(commandName)) {
-      command = await getCommandAsync(commandName);
-    }
-
-    if (!command) {
-      this.output.printError(`Unknown command: ${commandName}`);
+  private async showCommandHelp(commandPathOrName: string | string[]): Promise<void> {
+    const commandPath = Array.isArray(commandPathOrName) ? commandPathOrName : [commandPathOrName];
+    if (commandPath.length === 0) {
+      await this.showHelp();
       return;
     }
 
+    const rootName = commandPath[0];
+
+    // Try sync first, then lazy load
+    let command: Command | undefined = getCommand(rootName);
+    if (!command && hasCommand(rootName)) {
+      command = await getCommandAsync(rootName);
+    }
+
+    if (!command) {
+      this.output.printError(`Unknown command: ${rootName}`);
+      return;
+    }
+
+    // Walk into subcommands following the path so `hive-mind spawn --help`
+    // renders spawn's help, not hive-mind's parent help. We use a non-null
+    // local (`current`) instead of reassigning the optional `command` so
+    // TS can prove the value is defined for the rest of the function.
+    let current: Command = command;
+    const titleParts: string[] = [current.name];
+    for (let i = 1; i < commandPath.length; i++) {
+      const subName = commandPath[i];
+      const sub = current.subcommands?.find(sc => sc.name === subName || sc.aliases?.includes(subName));
+      if (!sub) break; // unknown leaf — fall back to last known
+      current = sub;
+      titleParts.push(sub.name);
+    }
+
     this.output.writeln();
-    this.output.writeln(this.output.bold(`${this.name} ${command.name}`));
-    this.output.writeln(command.description);
+    this.output.writeln(this.output.bold(`${this.name} ${titleParts.join(' ')}`));
+    this.output.writeln(current.description);
     this.output.writeln();
 
     // Subcommands
-    if (command.subcommands && command.subcommands.length > 0) {
+    if (current.subcommands && current.subcommands.length > 0) {
       this.output.writeln(this.output.bold('SUBCOMMANDS:'));
-      for (const sub of command.subcommands) {
+      for (const sub of current.subcommands) {
         if (sub.hidden) continue;
         const name = sub.name.padEnd(15);
         const aliases = sub.aliases ? this.output.dim(` (${sub.aliases.join(', ')})`) : '';
@@ -395,9 +535,9 @@ export class CLI {
     }
 
     // Options
-    if (command.options && command.options.length > 0) {
+    if (current.options && current.options.length > 0) {
       this.output.writeln(this.output.bold('OPTIONS:'));
-      for (const opt of command.options) {
+      for (const opt of current.options) {
         const flags = opt.short ? `-${opt.short}, --${opt.name}` : `    --${opt.name}`;
         const required = opt.required ? this.output.error(' (required)') : '';
         const defaultVal = opt.default !== undefined ? this.output.dim(` [default: ${opt.default}]`) : '';
@@ -407,9 +547,9 @@ export class CLI {
     }
 
     // Examples
-    if (command.examples && command.examples.length > 0) {
+    if (current.examples && current.examples.length > 0) {
       this.output.writeln(this.output.bold('EXAMPLES:'));
-      for (const example of command.examples) {
+      for (const example of current.examples) {
         this.output.writeln(`  ${this.output.dim('$')} ${example.command}`);
         this.output.writeln(`    ${this.output.dim(example.description)}`);
       }
@@ -555,6 +695,8 @@ export {
 // Memory & Intelligence (V3 Performance Features)
 export {
   initializeMemoryDatabase,
+  repairVectorIndexes,
+  recoverMemoryDatabase,
   generateEmbedding,
   generateBatchEmbeddings,
   storeEntry,

@@ -40,6 +40,7 @@ import { ResearchMode } from './modes/research.js';
 import { EdgeMode } from './modes/edge.js';
 import { BatchMode } from './modes/batch.js';
 import type { ModeImplementation } from './modes/index.js';
+import { deepEncode, deepDecode } from './utils/serialize.js';
 
 /**
  * Default mode configurations
@@ -588,6 +589,76 @@ export class SONAManager {
   getStats(): NeuralStats {
     this.updateStats();
     return { ...this.stats };
+  }
+
+  // ==========================================================================
+  // Persistence (#1773 Phase 1.6)
+  // ==========================================================================
+
+  /**
+   * Serialize manager state to a JSON-safe object. Includes mode, config,
+   * trajectories, patterns, LoRA weights, EWC state, and stats. Excludes
+   * the active mode implementation (rebuilt on deserialize) and event
+   * listeners (callers re-register on restore).
+   */
+  serialize(): unknown {
+    return deepEncode({
+      schemaVersion: 1,
+      currentMode: this.currentMode,
+      config: this.config,
+      optimizations: this.optimizations,
+      trajectories: this.trajectories,
+      patterns: this.patterns,
+      loraWeights: this.loraWeights,
+      ewcState: this.ewcState,
+      stats: this.stats,
+      isInitialized: this.isInitialized,
+      operationCount: this.operationCount,
+      totalLatencyMs: this.totalLatencyMs,
+      learningCycles: this.learningCycles,
+      lastStatsUpdate: this.lastStatsUpdate,
+    });
+  }
+
+  /**
+   * Restore manager state from a previously-serialized snapshot. Mode
+   * implementation is rebuilt for the saved mode. Event listeners are NOT
+   * restored — re-register manually after deserialize() returns.
+   */
+  deserialize(state: unknown): void {
+    const decoded = deepDecode(state) as {
+      schemaVersion: number;
+      currentMode: SONAMode;
+      config: SONAModeConfig;
+      optimizations: ModeOptimizations;
+      trajectories: Map<string, Trajectory>;
+      patterns: Map<string, Pattern>;
+      loraWeights: Map<string, LoRAWeights>;
+      ewcState: EWCState | null;
+      stats: NeuralStats;
+      isInitialized: boolean;
+      operationCount: number;
+      totalLatencyMs: number;
+      learningCycles: number;
+      lastStatsUpdate: number;
+    };
+    if (decoded.schemaVersion !== 1) {
+      throw new Error(`SONAManager: unsupported schemaVersion ${decoded.schemaVersion} (expected 1)`);
+    }
+    this.currentMode = decoded.currentMode;
+    this.config = decoded.config;
+    this.optimizations = decoded.optimizations;
+    this.modeImpl = this.createModeImplementation(this.currentMode);
+    this.trajectories = decoded.trajectories;
+    this.patterns = decoded.patterns;
+    this.loraWeights = decoded.loraWeights;
+    this.ewcState = decoded.ewcState;
+    this.stats = decoded.stats;
+    this.isInitialized = decoded.isInitialized;
+    this.operationCount = decoded.operationCount;
+    this.totalLatencyMs = decoded.totalLatencyMs;
+    this.learningCycles = decoded.learningCycles;
+    this.lastStatsUpdate = decoded.lastStatsUpdate;
   }
 
   // ==========================================================================

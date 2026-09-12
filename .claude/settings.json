@@ -1,5 +1,6 @@
 {
-  "model": "claude-opus-4-7",
+  "model": "claude-sonnet-5",
+  "skillListingBudgetFraction": 0.06,
   "customInstructions": "Follow the project's CLAUDE.md guidelines. Use concurrent execution for all operations. Prioritize v3 implementation with security-first development, 15-agent swarm coordination, phased performance optimization, and cross-platform helper automation.",
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
@@ -164,7 +165,7 @@
     "version": "3.6.11",
     "enabled": true,
     "modelPreferences": {
-      "default": "claude-opus-4-7",
+      "default": "claude-sonnet-5",
       "routing": "claude-haiku-4-5-20251001"
     },
     "agentTeams": {
@@ -173,7 +174,7 @@
       "taskListEnabled": true,
       "mailboxEnabled": true,
       "coordination": {
-        "autoAssignOnIdle": true,
+        "autoAssignOnIdle": false,
         "trainPatternsOnComplete": true,
         "notifyLeadOnComplete": true,
         "sharedMemoryNamespace": "agent-teams"
@@ -181,7 +182,7 @@
       "hooks": {
         "teammateIdle": {
           "enabled": true,
-          "autoAssign": true,
+          "autoAssign": false,
           "checkTaskList": true
         },
         "taskCompleted": {

@@ -73,21 +73,43 @@ export default defineConfig({
     clearMocks: true,
     restoreMocks: true,
 
-    // Timeout for async operations
-    testTimeout: 10000,
-    hookTimeout: 10000,
+    // Timeout for async operations.
+    // Bumped from 10s → 30s because CI runners cold-load HuggingFace models
+    // and ONNX runtimes that take 5-20s on first call, causing timeout
+    // failures in guidance-provider and reasoningbank tests. Local runs
+    // with cached models still finish in <1s; the headroom only matters
+    // on cold environments.
+    testTimeout: 30000,
+    hookTimeout: 30000,
 
     // Reporter configuration
     reporters: ['default'],
 
-    // Parallel execution
+    // Parallel execution.
+    // Use 'threads' as the default. Briefly tried 'forks' because of
+    // exit-time segfaults from native bindings (onnxruntime-node /
+    // ruvector / agentic-flow) — but forks expose module-load
+    // unhandled rejections more aggressively, causing 12 test files
+    // (transformers transitive-importers) to fail with 'No test suite
+    // found'. Threads tolerate the rejection and let tests report,
+    // and the segfault happens only at process shutdown. CI handles
+    // exit code 139 as success when results were reported (see test job).
     pool: 'threads',
     poolOptions: {
       threads: {
         singleThread: false,
         isolate: true,
       },
+      forks: {
+        singleFork: false,
+        isolate: true,
+      },
     },
+    // Per-file pool override: tests that need process.chdir() must run
+    // in a forked subprocess (Node's worker threads forbid chdir).
+    poolMatchGlobs: [
+      ['**/router-bandit.test.ts', 'forks'],
+    ],
 
     // Globals for easier testing
     globals: true,

@@ -21,6 +21,8 @@ export interface TextGenerationContext {
 	provider?: string;
 	locals: App.Locals | undefined;
 	abortController: AbortController;
-	/** Autopilot mode — auto-continue tool calls up to 30 iterations */
+	/** Autopilot mode — auto-continue tool calls up to autopilotMaxSteps iterations */
 	autopilot?: boolean;
+	/** User-configurable cap on autopilot tool-call loops; server falls back to 30 if undefined */
+	autopilotMaxSteps?: number;
 }

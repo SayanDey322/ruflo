@@ -1,6 +1,6 @@
 {
   "name": "@claude-flow/shared",
-  "version": "3.0.0-alpha.7",
+  "version": "3.0.0-alpha.8",
   "type": "module",
   "description": "Shared module - common types, events, utilities, core interfaces",
   "main": "dist/index.js",
@@ -32,7 +32,7 @@
     "cors": "^2.8.5",
     "express": "^4.21.0",
     "helmet": "^7.1.0",
-    "vitest": "^4.0.16",
+    "vitest": "^4.1.0",
     "ws": "^8.16.0",
     "zod": "^3.22.4"
   },

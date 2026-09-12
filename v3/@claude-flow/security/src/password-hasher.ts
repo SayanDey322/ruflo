@@ -13,7 +13,14 @@
  * @module v3/security/password-hasher
  */
 
-import * as bcrypt from 'bcrypt';
+// #1608 — switched from `bcrypt` to `bcryptjs` to drop the
+// `@mapbox/node-pre-gyp → tar <=7.5.10` transitive chain that pulled in
+// 6 HIGH-severity CVEs (GHSA-34x7-hfp2-rc4v, GHSA-8qq5-rm4j-mr97, etc.).
+// `bcryptjs` is a pure-JS implementation that produces the same `$2a$` /
+// `$2b$` hash format and exposes the same `hash()` / `compare()` API
+// surface this module uses, so the swap is transparent to callers and to
+// any persisted hashes.
+import * as bcrypt from 'bcryptjs';
 
 export interface PasswordHasherConfig {
   /**

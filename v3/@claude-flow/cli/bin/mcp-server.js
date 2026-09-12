@@ -9,11 +9,22 @@
 
 import { randomUUID } from 'crypto';
 
-// Suppress [AgentDB Patch] warnings (cosmetic, from agentic-flow v1.x compat patch)
+// Suppress the SPECIFIC cosmetic "[AgentDB Patch] Controller index not found"
+// noise. Tight match (both prefix AND "Controller index not found") so other
+// [AgentDB Patch] warnings about real issues still flow through. Also patch
+// console.log because the underlying call site uses it. See bin/cli.js for
+// the same rationale.
 const _origWarn = console.warn;
+const _origLog = console.log;
+const _isCosmeticAgentdbPatchNoise = (msg) =>
+  msg.includes('[AgentDB Patch]') && msg.includes('Controller index not found');
 console.warn = (...args) => {
-  if (String(args[0] ?? '').includes('[AgentDB Patch]')) return;
+  if (_isCosmeticAgentdbPatchNoise(String(args[0] ?? ''))) return;
   _origWarn.apply(console, args);
+};
+console.log = (...args) => {
+  if (_isCosmeticAgentdbPatchNoise(String(args[0] ?? ''))) return;
+  _origLog.apply(console, args);
 };
 
 import { listMCPTools, callMCPTool, hasTool } from '../dist/src/mcp-client.js';
@@ -37,11 +48,27 @@ console.error(JSON.stringify({
 }));
 
 // Handle stdin messages
+// Audit-flagged DoS protection (audit_1776483149979): cap stdin buffer
+// to 10MB. See bin/cli.js for the same protection on the auto-detect path.
+const MCP_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 let buffer = '';
 
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', async (chunk) => {
   buffer += chunk;
+
+  if (buffer.length > MCP_MAX_BUFFER_BYTES) {
+    console.log(JSON.stringify({
+      jsonrpc: '2.0',
+      id: null,
+      error: {
+        code: -32700,
+        message: `Buffered stdin exceeds ${MCP_MAX_BUFFER_BYTES} bytes without newline; resetting`,
+      },
+    }));
+    buffer = '';
+    return;
+  }
 
   // Process complete JSON messages (newline-delimited)
   let lines = buffer.split('\n');
@@ -111,7 +138,7 @@ async function handleMessage(message) {
           id: message.id,
           result: {
             protocolVersion: '2024-11-05',
-            serverInfo: { name: 'claude-flow', version: VERSION },
+            serverInfo: { name: 'ruflo', version: VERSION },
             capabilities: {
               tools: { listChanged: true },
               resources: { subscribe: true, listChanged: true },

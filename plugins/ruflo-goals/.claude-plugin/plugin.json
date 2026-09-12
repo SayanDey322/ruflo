@@ -1,7 +1,7 @@
 {
   "name": "ruflo-goals",
   "description": "Long-horizon goal planning, deep research orchestration, and adaptive replanning using GOAP algorithms",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "author": {
     "name": "ruvnet",
     "url": "https://github.com/ruvnet"
@@ -15,6 +15,12 @@
     "research",
     "planning",
     "deep-research",
-    "long-horizon"
+    "long-horizon",
+    "dossier",
+    "investigation",
+    "osint",
+    "mcp",
+    "evidence-grading",
+    "legacy-namespaces"
   ]
 }

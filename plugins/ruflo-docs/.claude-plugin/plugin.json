@@ -1,7 +1,7 @@
 {
   "name": "ruflo-docs",
-  "description": "Documentation generation, API docs, and drift detection",
-  "version": "0.1.0",
+  "description": "Documentation generation, API docs (JSDoc/TSDoc/OpenAPI), and drift detection — drives the `document` background worker via hooks_worker-dispatch; uses Haiku model for cost-efficient docs work",
+  "version": "0.2.1",
   "author": {
     "name": "ruvnet",
     "url": "https://github.com/ruvnet"
@@ -12,6 +12,9 @@
     "ruflo",
     "documentation",
     "api-docs",
-    "drift-detection"
+    "drift-detection",
+    "jsdoc",
+    "openapi",
+    "mcp"
   ]
 }

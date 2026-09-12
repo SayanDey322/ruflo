@@ -20,10 +20,12 @@ claude --plugin-dir plugins/ruflo-observability
 
 ## Skills
 
-| Skill | Usage | Description |
-|-------|-------|-------------|
-| `observe-trace` | `/observe-trace <task-id>` | Trace agent execution by collecting spans and building a trace tree |
-| `observe-metrics` | `/observe-metrics [--period 1h]` | Aggregate and display system metrics with anomaly detection |
+Skills are auto-invoked via the Skill tool when their `description` matches the task (progressive disclosure). For an explicit CLI surface use the `/observe` slash command below.
+
+| Skill | Argument hint | Description |
+|-------|---------------|-------------|
+| `observe-trace` | `<task-id>` | Trace agent execution by collecting spans and building a trace tree |
+| `observe-metrics` | `[--period 1h]` | Aggregate and display system metrics with anomaly detection |
 
 ## Commands (5 subcommands)
 
@@ -62,8 +64,33 @@ observe correlate <agent-id>         # Correlate all telemetry for an agent
 
 JSON structured logs with `timestamp`, `level`, `message`, `correlationId`, `agentId`, `taskId`, `spanId`, `traceId`, `duration_ms`, and `metadata`.
 
+## Compatibility
+
+- **CLI:** pinned to `@claude-flow/cli` v3.6 major+minor.
+- **Verification:** `bash plugins/ruflo-observability/scripts/smoke.sh` is the contract.
+
+## Namespace coordination
+
+This plugin owns the `observability` AgentDB namespace (base-name exception per [ruflo-agentdb ADR-0001 §"Namespace convention"](../ruflo-agentdb/docs/adrs/0001-agentdb-optimization.md), same precedent as `federation` and `migrations`). Reserved namespaces (`pattern`, `claude-memories`, `default`) MUST NOT be shadowed.
+
+`observability` is accessed via `memory_*` tools (namespace-routed). Stores spans, metric snapshots, and log entries.
+
+> **Routing note:** Earlier versions of these skills used `agentdb_hierarchical-recall` with namespace argument — that tool family routes by tier and ignores namespace strings. ADR-0001 fixed the skills to use `memory_*` for namespaced reads and documented the dual pattern-store path for metric snapshots.
+
+## Verification
+
+```bash
+bash plugins/ruflo-observability/scripts/smoke.sh
+# Expected: "10 passed, 0 failed"
+```
+
+## Architecture Decisions
+
+- [`ADR-0001` — ruflo-observability plugin contract (namespace-routing fix, smoke as contract)](./docs/adrs/0001-observability-contract.md)
+
 ## Related Plugins
 
+- `ruflo-agentdb` — namespace convention owner; defines the routing rules ADR-0001 fixes a violation of
 - `ruflo-cost-tracker` -- Token usage metrics feed into cost attribution
 - `ruflo-iot-cognitum` -- Reuses Z-score anomaly detection for telemetry patterns
 - `ruflo-market-data` -- Data feed health and ingestion latency monitoring

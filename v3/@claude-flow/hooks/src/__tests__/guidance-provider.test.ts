@@ -405,7 +405,12 @@ describe('GuidanceProvider', () => {
       expect(result.shouldStop).toBe(true);
     });
 
-    it('should block stopping when too many unconsolidated patterns', { timeout: 15000 }, async () => {
+    it('should block stopping when too many unconsolidated patterns', { timeout: 180000 }, async () => {
+      // Bumped 15s → 180s: storing 12 patterns triggers HuggingFace
+      // embedding generation. Cold-cache CI runs spend 30-60s downloading
+      // the model itself, then ~3-5s per pattern inference (12×). 60s
+      // wasn't enough; 180s gives headroom for slow runners. Local warm
+      // runs still finish in <2s.
       // Store more than 10 patterns to trigger the check
       for (let i = 0; i < 12; i++) {
         await reasoningBank.storePattern(`Pattern ${i}`, 'general');

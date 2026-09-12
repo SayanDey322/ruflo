@@ -2,7 +2,7 @@
 name: discover-plugins
 description: Discover and recommend ruflo plugins based on your workflow, installed MCP tools, and current task
 argument-hint: "[search-query]"
-allowed-tools: mcp__claude-flow__transfer_plugin-search mcp__claude-flow__transfer_plugin-info mcp__claude-flow__transfer_plugin-featured mcp__claude-flow__transfer_plugin-official mcp__claude-flow__transfer_store-search mcp__claude-flow__transfer_store-featured mcp__claude-flow__transfer_store-trending mcp__claude-flow__transfer_store-info mcp__claude-flow__guidance_discover mcp__claude-flow__guidance_recommend mcp__claude-flow__guidance_capabilities mcp__claude-flow__mcp_status Bash Read
+allowed-tools: mcp__plugin_ruflo-core_ruflo__transfer_plugin-search mcp__plugin_ruflo-core_ruflo__transfer_plugin-info mcp__plugin_ruflo-core_ruflo__transfer_plugin-featured mcp__plugin_ruflo-core_ruflo__transfer_plugin-official mcp__plugin_ruflo-core_ruflo__transfer_store-search mcp__plugin_ruflo-core_ruflo__transfer_store-featured mcp__plugin_ruflo-core_ruflo__transfer_store-trending mcp__plugin_ruflo-core_ruflo__transfer_store-info mcp__plugin_ruflo-core_ruflo__guidance_discover mcp__plugin_ruflo-core_ruflo__guidance_recommend mcp__plugin_ruflo-core_ruflo__guidance_capabilities mcp__plugin_ruflo-core_ruflo__mcp_status Bash Read
 ---
 
 # Discover Plugins
@@ -16,11 +16,11 @@ When starting a new project, exploring ruflo capabilities, or wondering which pl
 ## Steps
 
 1. **Check installed** — run `ls plugins/` to see what's already installed
-2. **Browse marketplace** — call `mcp__claude-flow__transfer_plugin-featured` for recommended plugins
-3. **Search by need** — call `mcp__claude-flow__transfer_plugin-search` with keywords matching your task
-4. **Get recommendations** — call `mcp__claude-flow__guidance_recommend` with your current task description for personalized suggestions
-5. **Check capabilities** — call `mcp__claude-flow__guidance_capabilities` to see what each plugin enables
-6. **Show details** — call `mcp__claude-flow__transfer_plugin-info` for full plugin details
+2. **Browse marketplace** — call `mcp__plugin_ruflo-core_ruflo__transfer_plugin-featured` for recommended plugins
+3. **Search by need** — call `mcp__plugin_ruflo-core_ruflo__transfer_plugin-search` with keywords matching your task
+4. **Get recommendations** — call `mcp__plugin_ruflo-core_ruflo__guidance_recommend` with your current task description for personalized suggestions
+5. **Check capabilities** — call `mcp__plugin_ruflo-core_ruflo__guidance_capabilities` to see what each plugin enables
+6. **Show details** — call `mcp__plugin_ruflo-core_ruflo__transfer_plugin-info` for full plugin details
 
 ## Plugin Catalog (32 plugins)
 
@@ -70,7 +70,7 @@ When starting a new project, exploring ruflo capabilities, or wondering which pl
 | **ruflo-jujutsu** | PR review, merge decisions, diff risk scoring | Diff analysis, risk classification, reviewer recommendations |
 | **ruflo-docs** | After API changes, before releases | Doc generation, drift detection, API documentation |
 | **ruflo-ruvllm** | Local LLM inference, custom model configs | RuVLLM integration, MicroLoRA fine-tuning, chat formatting |
-| **ruflo-wasm** | Sandboxed code execution, untrusted workloads | WASM agent sandboxing, community gallery |
+| **ruflo-agent** | Sandboxed code execution, untrusted workloads | WASM agent sandboxing, community gallery |
 | **ruflo-plugin-creator** | Building new ruflo plugins | Scaffold structure, validate frontmatter, test MCP references |
 | **ruflo-migrations** | Database schema changes | Sequential migration numbering, up/down pairs, dry-run, rollback validation |
 | **ruflo-observability** | Logging, tracing, metrics correlation | Structured JSON logging, distributed tracing, agent-to-app telemetry correlation |

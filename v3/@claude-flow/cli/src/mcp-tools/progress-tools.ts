@@ -264,7 +264,7 @@ function getSummary(metrics: V3ProgressMetrics): string {
  */
 const progressCheck: MCPTool = {
   name: 'progress_check',
-  description: 'Get current V3 implementation progress percentage and metrics',
+  description: 'Get current V3 implementation progress percentage and metrics Use when native TodoWrite is wrong because you need cross-session goal-completion tracking with witness/audit trail. For in-session checklists, native TodoWrite is simpler.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -311,7 +311,7 @@ const progressCheck: MCPTool = {
  */
 const progressSync: MCPTool = {
   name: 'progress_sync',
-  description: 'Calculate and persist V3 progress metrics to file',
+  description: 'Calculate and persist V3 progress metrics to file Use when native TodoWrite is wrong because you need cross-session goal-completion tracking with witness/audit trail. For in-session checklists, native TodoWrite is simpler.',
   inputSchema: {
     type: 'object',
     properties: {},
@@ -333,7 +333,7 @@ const progressSync: MCPTool = {
  */
 const progressSummary: MCPTool = {
   name: 'progress_summary',
-  description: 'Get human-readable V3 implementation progress summary',
+  description: 'Get human-readable V3 implementation progress summary Use when native TodoWrite is wrong because you need cross-session goal-completion tracking with witness/audit trail. For in-session checklists, native TodoWrite is simpler.',
   inputSchema: {
     type: 'object',
     properties: {},
@@ -352,7 +352,7 @@ const progressSummary: MCPTool = {
  */
 const progressWatch: MCPTool = {
   name: 'progress_watch',
-  description: 'Get current watch status for progress monitoring',
+  description: 'Get current watch status for progress monitoring Use when native TodoWrite is wrong because you need cross-session goal-completion tracking with witness/audit trail. For in-session checklists, native TodoWrite is simpler.',
   inputSchema: {
     type: 'object',
     properties: {

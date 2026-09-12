@@ -1,7 +1,7 @@
 # ADR-085: Comprehensive Remediation of Issue #1425
 
-## Status
-Accepted
+**Status**: Accepted — Partially Implemented (items 1, 4, 5, 6, 7 landed in v3.5.71; items 2 WS consolidation and 3 AgentRegistry deferred)
+**Date**: 2026-04-07 (proposed) · **Updated**: 2026-05-09
 
 ## Context
 
@@ -46,3 +46,22 @@ Add compaction pass in `session-start` hook that deduplicates entries by content
 - v3 CLI has proper type safety, consolidated infrastructure, and honest metrics
 - Input validation covers all user-facing entry points
 - Larger architectural items (#2 WS, #3 agent management) get shared modules that benefit future development
+
+## Implementation status (2026-05-09)
+
+Items 1, 4, 5, 6, and 7 shipped in v3.5.71 (commit `a101c2a08`). Items 2 (WS consolidation) and 3 (AgentRegistry) were not implemented in v3.5.71 and remain deferred — no subsequent commit adds the shared `ws/` module or a unified `AgentRegistry` class.
+
+| Item | Description | Status | Files | Commit(s) |
+|---|---|---|---|---|
+| **1** | Eliminate 19 `any` types in v3 commands | Implemented (2 justified remain in `neural.ts`) | `v3/@claude-flow/cli/src/commands/*.ts` | `a101c2a08 fix: comprehensive #1425 remediation` |
+| **2** | Consolidate 3 WebSocket implementations into `shared/src/ws/` | **Deferred** | — | — |
+| **3** | Unify agent management into shared `AgentRegistry` | **Deferred** | — | — |
+| **4** | Wire `providers list`/`test` to real config + HTTP health checks | Implemented | `v3/@claude-flow/cli/src/commands/providers.ts` | `a101c2a08` |
+| **5** | Expand input validation to all 43 command handlers (27/28 MCP tool files, ~120+ handlers) | Implemented | `v3/@claude-flow/cli/src/mcp-tools/*.ts` | `a101c2a08` |
+| **6** | Remove `sleep(352)` and fabricated Token Optimizer metrics (`+= 200`, `32%`, `95%` claims) | Implemented | `v3/@claude-flow/cli/src/` (integration dist rebuilt) | `a101c2a08` |
+| **7** | Intelligence layer content-based dedup on session start | Implemented | `v3/@claude-flow/cli/src/memory/intelligence.ts` | `a101c2a08` |
+
+### Deferred items
+
+- **Item 2 — WS consolidation**: no `v3/@claude-flow/shared/src/ws/` module exists; the three separate WebSocket implementations in CLI, hooks, and MCP bridge remain unconsolidated.
+- **Item 3 — AgentRegistry**: no shared `AgentRegistry` class exists; `AgentManager`, `ContainerWorkerPool`, and MCP agent tools do not share a common registry.

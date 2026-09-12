@@ -251,7 +251,7 @@ function generateAgentTypeCode(agentType: string): { definition: AgentTypeDefini
     name: `${sanitizedType} Agent`,
     description: `Generated agent type: ${sanitizedType}`,
     capabilities: ['general'],
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     systemPrompt: `You are a ${sanitizedType} agent.`,
   };
 
@@ -261,7 +261,7 @@ const ${camelCase(sanitizedType)}Agent: AgentTypeDefinition = {
   name: '${sanitizedType} Agent',
   description: 'Generated agent type: ${sanitizedType}',
   capabilities: ['general'],
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   systemPrompt: 'You are a ${sanitizedType} agent.',
 };
 `;

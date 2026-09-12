@@ -13,7 +13,10 @@ export type FederationMessageType =
   | 'handshake-init'
   | 'handshake-accept'
   | 'handshake-reject'
-  | 'session-terminate';
+  | 'session-terminate'
+  // ADR-101 Component C: cross-node claims operations
+  | 'claim-event'      // gossip a ClaimDomainEvent across the federation
+  | 'agent-handoff';   // request to transfer ownership of a claim to a remote agent
 
 export type PIIScanAction = 'pass' | 'redact' | 'hash' | 'block';
 
@@ -116,4 +119,7 @@ export const CONSENSUS_REQUIRED_TYPES: ReadonlySet<FederationMessageType> = new 
   'trust-change',
   'topology-change',
   'agent-spawn',
+  // ADR-101 Component C: handoffs cross trust boundaries — optionally
+  // require quorum from validators in high-trust deployments.
+  'agent-handoff',
 ]);

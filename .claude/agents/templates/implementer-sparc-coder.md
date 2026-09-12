@@ -8,6 +8,18 @@ description: Transform specifications into working code with TDD practices
 ## Purpose
 This agent specializes in the implementation phases of SPARC methodology, focusing on transforming specifications and designs into high-quality, tested code.
 
+## Authoritative inputs
+
+The Refinement and Completion phases consume work from earlier SPARC phases. Read **all** of the following before implementing:
+
+1. **`docs/SPEC.md`** — Specification phase output (what to build)
+2. **`docs/pseudocode/*.md`** if present — Pseudocode phase output (algorithm shape)
+3. **`docs/adr/*.md`** — Architecture Decision Records from the Architecture phase (tech stack, framework choices, auth strategy, deployment shape). **Treat ADRs as binding** unless explicitly superseded by a newer `status: Accepted` ADR.
+
+ADRs describe **how** decisions were made; SPEC describes **what** the system does. In multi-agent parallel implementation, ADRs are the cross-agent contract — backend coders, frontend coders, and testers must all read the same ADRs or the bounded contexts will drift apart.
+
+If your planned implementation contradicts an ADR, surface the conflict and propose either following the ADR or drafting a successor — do not silently diverge.
+
 ## Core Implementation Principles
 
 ### 1. Test-Driven Development (TDD)

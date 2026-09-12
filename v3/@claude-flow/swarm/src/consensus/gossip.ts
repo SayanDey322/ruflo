@@ -4,6 +4,7 @@
  */
 
 import { EventEmitter } from 'events';
+import type { ConsensusTransport, ConsensusMessage } from './transport.js';
 import {
   ConsensusProposal,
   ConsensusVote,
@@ -76,6 +77,14 @@ export interface GossipConfig extends Partial<ConsensusConfig> {
   gossipIntervalMs?: number;
   maxHops?: number;
   convergenceThreshold?: number;
+  /**
+   * ADR-095 G2 — optional pluggable transport. When set, gossip messages
+   * to neighbors actually go over it (signed if the transport has a
+   * keypair) and inbound gossip is routed back into the merge logic.
+   * When unset, behavior is unchanged: the legacy in-process path mutates
+   * the local `nodes` map directly (single-process).
+   */
+  transport?: ConsensusTransport;
 }
 
 export class GossipConsensus extends EventEmitter {
@@ -86,6 +95,7 @@ export class GossipConsensus extends EventEmitter {
   private messageQueue: GossipMessage[] = [];
   private gossipInterval?: NodeJS.Timeout;
   private proposalCounter: number = 0;
+  private readonly transport?: ConsensusTransport;
 
   constructor(nodeId: string, config: GossipConfig = {}) {
     super();
@@ -98,7 +108,9 @@ export class GossipConsensus extends EventEmitter {
       gossipIntervalMs: config.gossipIntervalMs ?? 100,
       maxHops: config.maxHops ?? 10,
       convergenceThreshold: config.convergenceThreshold ?? 0.9,
+      transport: config.transport,
     };
+    this.transport = config.transport;
 
     this.node = {
       id: nodeId,
@@ -108,6 +120,34 @@ export class GossipConsensus extends EventEmitter {
       seenMessages: new BoundedSet(100_000), // PERF-01: ~4MB cap (100K × ~40B IDs)
       lastSync: new Date(),
     };
+
+    if (this.transport) {
+      this.transport.onMessage(async (msg: ConsensusMessage) => this.handleInboundGossipMessage(msg));
+    }
+  }
+
+  /**
+   * ADR-095 G2 — route an inbound transport message into the gossip merge
+   * logic. The transport handles signature verification (if enabled). We
+   * dedupe by message id (the BoundedSet `seenMessages`) and process it as
+   * though it arrived from a neighbor.
+   */
+  private async handleInboundGossipMessage(msg: ConsensusMessage): Promise<void> {
+    if (msg.type !== 'gossip') return;
+    const gm = msg.payload as GossipMessage | undefined;
+    if (!gm || typeof gm.id !== 'string') return;
+    if (this.node.seenMessages.has(gm.id)) return;
+    // Ensure the sender is known as a neighbor so processReceivedMessage works.
+    if (!this.nodes.has(msg.from)) {
+      this.nodes.set(msg.from, { id: msg.from, state: new Map(), version: 0, neighbors: new Set(), seenMessages: new BoundedSet(100_000), lastSync: new Date() });
+    }
+    this.node.neighbors.add(msg.from);
+    // Process against THIS node's state (the message reached us).
+    await this.processReceivedMessage(this.node, {
+      ...gm,
+      timestamp: gm.timestamp ? new Date(gm.timestamp as unknown as string) : new Date(),
+      path: Array.isArray(gm.path) ? gm.path : [],
+    });
   }
 
   async initialize(): Promise<void> {
@@ -314,26 +354,34 @@ export class GossipConsensus extends EventEmitter {
   }
 
   private async sendToNeighbor(neighborId: string, message: GossipMessage): Promise<void> {
-    const neighbor = this.nodes.get(neighborId);
-    if (!neighbor) {
-      return;
-    }
-
-    // Check if already seen
-    if (neighbor.seenMessages.has(message.id)) {
-      return;
-    }
-
-    // Deliver message to neighbor node
     const deliveredMessage: GossipMessage = {
       ...message,
       hops: message.hops + 1,
       path: [...message.path, neighborId],
     };
 
-    // Process at neighbor
-    await this.processReceivedMessage(neighbor, deliveredMessage);
+    // ADR-095 G2 — over the transport when wired: actually send the gossip
+    // message to the neighbor (signed by the transport if signing is on).
+    // The emit stays for observability.
+    if (this.transport) {
+      this.emit('message.sent', { to: neighborId, message: deliveredMessage });
+      try {
+        await this.transport.send(neighborId, {
+          type: 'gossip',
+          payload: { ...deliveredMessage, timestamp: deliveredMessage.timestamp.toISOString() },
+        });
+      } catch {
+        // Unreachable neighbor — gossip tolerates this; it'll converge via
+        // other paths or the next gossip round.
+      }
+      return;
+    }
 
+    // Legacy in-process path — deliver to the fake neighbor state.
+    const neighbor = this.nodes.get(neighborId);
+    if (!neighbor) return;
+    if (neighbor.seenMessages.has(message.id)) return;
+    await this.processReceivedMessage(neighbor, deliveredMessage);
     this.emit('message.sent', { to: neighborId, message: deliveredMessage });
   }
 

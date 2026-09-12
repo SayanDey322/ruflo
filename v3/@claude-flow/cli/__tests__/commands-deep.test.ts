@@ -1487,9 +1487,19 @@ describe('Init System', () => {
       expect(perms.deny).toBeDefined();
     });
 
-    it('should include attribution', () => {
+    it('should NOT include attribution by default (opt-in per #1670)', () => {
+      // #1670 — attribution (Co-Authored-By trailer) is now opt-in to avoid
+      // silently injecting a third-party co-author into user commits.
       const settings = generateSettings(DEFAULT_INIT_OPTIONS) as Record<string, unknown>;
+      expect(settings.attribution).toBeUndefined();
+    });
+
+    it('should include attribution when opted in', () => {
+      const settings = generateSettings({ ...DEFAULT_INIT_OPTIONS, attribution: true }) as Record<string, unknown>;
       expect(settings.attribution).toBeDefined();
+      const attribution = settings.attribution as Record<string, string>;
+      expect(attribution.commit).toContain('Co-Authored-By:');
+      expect(attribution.pr).toContain('Generated with');
     });
 
     it('should include env with agent teams enabled', () => {
@@ -1530,44 +1540,76 @@ describe('Init System', () => {
       expect(md.length).toBeGreaterThan(100);
     });
 
-    it('should contain header with RuFlo V3', () => {
+    // The CLAUDE.md generator was deliberately rewritten to a terser, more
+    // imperative schema (header "# Ruflo — Claude Code Configuration", section
+    // titles like "## Rules" / "## Swarm & Routing"). These tests were
+    // originally written against the older verbose schema; updated below to
+    // pin the *current* contract so future drift is caught.
+    it('should contain the Ruflo header', () => {
       const md = generateClaudeMd(DEFAULT_INIT_OPTIONS);
-      expect(md).toContain('RuFlo V3');
+      expect(md).toContain('# Ruflo');
     });
 
-    it('should contain behavioral rules', () => {
+    it('should contain a Rules section (behavioral rules)', () => {
       const md = generateClaudeMd(DEFAULT_INIT_OPTIONS);
-      expect(md).toContain('Behavioral Rules');
+      expect(md).toContain('## Rules');
     });
 
-    it('should contain file organization', () => {
+    it('should mention required project subdirectories (file organization)', () => {
       const md = generateClaudeMd(DEFAULT_INIT_OPTIONS);
-      expect(md).toContain('File Organization');
+      // /src, /tests, /docs, /config, /scripts are all in the Rules block
+      expect(md).toContain('/src');
+      expect(md).toContain('/tests');
+      expect(md).toContain('/docs');
     });
 
-    it('should contain project architecture', () => {
+    it('should describe agent comms (project architecture coordination)', () => {
       const md = generateClaudeMd(DEFAULT_INIT_OPTIONS);
-      expect(md).toContain('Project Architecture');
+      expect(md).toContain('Agent Comms');
     });
 
-    it('should contain anti-drift configuration', () => {
+    it('should include the capability brain and complete implementation loop', () => {
+      const md = generateClaudeMd(DEFAULT_INIT_OPTIONS);
+      expect(md).toContain('guidance_brain({ mode: "recommend"');
+      expect(md).toContain('registered`, `configured`, `reachable`, `healthy`, and `authorized');
+      expect(md).toContain('12. Publish only through a separately authorized release gate');
+    });
+
+    it('should enforce isolated concurrent writers and non-expanding authority', () => {
+      const md = generateClaudeMd(DEFAULT_INIT_OPTIONS);
+      expect(md).toContain('Never allow two writers in one worktree');
+      expect(md).toContain('cannot add tools, network, secrets, spend');
+      expect(md).toContain('cannot self-promote or expand their SafetyEnvelope');
+      expect(md).not.toContain('After spawning: STOP');
+    });
+
+    it('should retain the governed workflow in every template', () => {
+      for (const template of CLAUDE_MD_TEMPLATES) {
+        const md = generateClaudeMd(DEFAULT_INIT_OPTIONS, template.name);
+        expect(md).toContain('## Ruflo Capability Brain & Implementation Loop');
+      }
+    });
+
+    it('should describe anti-drift swarm topology', () => {
       const md = generateClaudeMd(DEFAULT_INIT_OPTIONS, 'standard');
-      expect(md).toContain('Anti-Drift');
+      expect(md).toContain('anti-drift');
     });
 
-    it('standard template should include swarm orchestration', () => {
+    it('standard template should include swarm config', () => {
       const md = generateClaudeMd(DEFAULT_INIT_OPTIONS, 'standard');
-      expect(md).toContain('Swarm Orchestration');
+      expect(md).toContain('Swarm');
     });
 
-    it('full template should include hooks system', () => {
+    it('full template should include hooks reference', () => {
       const md = generateClaudeMd(DEFAULT_INIT_OPTIONS, 'full');
-      expect(md).toContain('Hooks System');
+      // hooksRef() emits a section about hooks
+      expect(md.toLowerCase()).toContain('hook');
     });
 
-    it('full template should include intelligence system', () => {
+    it('full template should include intelligence/SONA reference', () => {
       const md = generateClaudeMd(DEFAULT_INIT_OPTIONS, 'full');
-      expect(md).toContain('Intelligence System');
+      // intelligenceSystem() mentions SONA / RuVector / HNSW
+      expect(md.toLowerCase()).toMatch(/sona|ruvector|hnsw|intelligence/);
     });
 
     it('security template should include security rules', () => {

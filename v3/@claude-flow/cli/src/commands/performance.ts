@@ -5,6 +5,9 @@
  * Created with ❤️ by ruv.io
  */
 
+import * as os from 'node:os';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 
@@ -41,6 +44,7 @@ const benchmarkCommand: Command = {
       batchCosineSim,
       flashAttentionSearch,
       getHNSWStatus,
+      getHNSWIndex,
       storeEntry,
       searchEntries,
     } = await import('../memory/memory-initializer.js');
@@ -122,6 +126,10 @@ const benchmarkCommand: Command = {
     // 3. HNSW Search Benchmark
     if (suite === 'all' || suite === 'search') {
       spinner.setText('Benchmarking HNSW search...');
+      // Trigger lazy initialization before reading status (#1698) — without
+      // this the singleton stays null and we report "No index" even when
+      // @ruvector/core is loadable and the index has data on disk.
+      await getHNSWIndex().catch(() => null);
       const hnswStatus = getHNSWStatus();
 
       if (hnswStatus.available && hnswStatus.entryCount > 0) {
@@ -349,10 +357,6 @@ const metricsCommand: Command = {
     output.writeln(output.bold(`Performance Metrics (${timeframe})`));
     output.writeln(output.dim('─'.repeat(50)));
 
-    const os = await import('os');
-    const fs = await import('fs');
-    const path = await import('path');
-
     // Real system metrics
     const memUsage = process.memoryUsage();
     const cpuUsage = process.cpuUsage();
@@ -560,7 +564,7 @@ const optimizeCommand: Command = {
       data: [
         { priority: output.error('P0'), area: 'Memory', recommendation: 'Enable HNSW index quantization', impact: '+50% reduction' },
         { priority: output.warning('P1'), area: 'CPU', recommendation: 'Enable WASM SIMD acceleration', impact: '+4x speedup' },
-        { priority: output.warning('P1'), area: 'Latency', recommendation: 'Enable Flash Attention', impact: '+2.49x speedup' },
+        { priority: output.warning('P1'), area: 'Latency', recommendation: 'Flash Attention WASM (in progress, currently JS reference)', impact: '+2.49x target' },
         { priority: output.info('P2'), area: 'Cache', recommendation: 'Increase pattern cache size', impact: '+15% hit rate' },
         { priority: output.info('P2'), area: 'Network', recommendation: 'Enable request batching', impact: '-30% latency' },
       ],
@@ -602,7 +606,7 @@ const bottleneckCommand: Command = {
       ],
       data: [
         { component: 'Vector Search', bottleneck: 'Linear scan O(n)', severity: output.error('High'), solution: 'Enable HNSW indexing' },
-        { component: 'Neural Inference', bottleneck: 'Sequential attention', severity: output.warning('Medium'), solution: 'Enable Flash Attention' },
+        { component: 'Neural Inference', bottleneck: 'Sequential attention', severity: output.warning('Medium'), solution: 'Flash Attention WASM (in progress)' },
         { component: 'Memory Store', bottleneck: 'Lock contention', severity: output.info('Low'), solution: 'Use sharded storage' },
       ],
     });
@@ -639,7 +643,7 @@ export const performanceCommand: Command = {
     output.writeln('Performance Targets:');
     output.printList([
       'HNSW Search: 150x-12,500x faster than brute force',
-      'Flash Attention: 2.49x-7.47x speedup',
+      'Flash Attention: 2.49x-7.47x target (in progress; ships JS reference impl)',
       'Memory: 50-75% reduction with quantization',
     ]);
     output.writeln();

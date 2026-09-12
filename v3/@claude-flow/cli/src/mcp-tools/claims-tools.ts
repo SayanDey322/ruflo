@@ -96,7 +96,7 @@ function parseClaimant(str: string): Claimant | null {
 export const claimsTools: MCPTool[] = [
   {
     name: 'claims_claim',
-    description: 'Claim an issue for work (human or agent)',
+    description: 'Claim an issue for work (human or agent) Use when nothing native covers per-agent capability gating — Claude Code agents have file-system access by default. Pair claims_grant + claims_check before letting an agent run privileged ops. For trusted in-session work, no claims call is needed.',
     category: 'claims',
     inputSchema: {
       type: 'object',
@@ -166,7 +166,7 @@ export const claimsTools: MCPTool[] = [
 
   {
     name: 'claims_release',
-    description: 'Release a claim on an issue',
+    description: 'Release a claim on an issue Use when nothing native covers per-agent capability gating — Claude Code agents have file-system access by default. Pair claims_grant + claims_check before letting an agent run privileged ops. For trusted in-session work, no claims call is needed.',
     category: 'claims',
     inputSchema: {
       type: 'object',
@@ -227,7 +227,7 @@ export const claimsTools: MCPTool[] = [
 
   {
     name: 'claims_handoff',
-    description: 'Request handoff of an issue to another claimant',
+    description: 'Request handoff of an issue to another claimant Use when nothing native covers per-agent capability gating — Claude Code agents have file-system access by default. Pair claims_grant + claims_check before letting an agent run privileged ops. For trusted in-session work, no claims call is needed.',
     category: 'claims',
     inputSchema: {
       type: 'object',
@@ -305,7 +305,7 @@ export const claimsTools: MCPTool[] = [
 
   {
     name: 'claims_accept-handoff',
-    description: 'Accept a pending handoff',
+    description: 'Accept a pending handoff Use when nothing native covers per-agent capability gating — Claude Code agents have file-system access by default. Pair claims_grant + claims_check before letting an agent run privileged ops. For trusted in-session work, no claims call is needed.',
     category: 'claims',
     inputSchema: {
       type: 'object',
@@ -371,7 +371,7 @@ export const claimsTools: MCPTool[] = [
 
   {
     name: 'claims_status',
-    description: 'Update claim status',
+    description: 'Update claim status Use when nothing native covers per-agent capability gating — Claude Code agents have file-system access by default. Pair claims_grant + claims_check before letting an agent run privileged ops. For trusted in-session work, no claims call is needed.',
     category: 'claims',
     inputSchema: {
       type: 'object',
@@ -435,7 +435,7 @@ export const claimsTools: MCPTool[] = [
 
   {
     name: 'claims_list',
-    description: 'List all claims or filter by criteria',
+    description: 'List all claims or filter by criteria Use when nothing native covers per-agent capability gating — Claude Code agents have file-system access by default. Pair claims_grant + claims_check before letting an agent run privileged ops. For trusted in-session work, no claims call is needed.',
     category: 'claims',
     inputSchema: {
       type: 'object',
@@ -491,7 +491,7 @@ export const claimsTools: MCPTool[] = [
 
   {
     name: 'claims_mark-stealable',
-    description: 'Mark an issue as stealable by other agents',
+    description: 'Mark an issue as stealable by other agents Use when nothing native covers per-agent capability gating — Claude Code agents have file-system access by default. Pair claims_grant + claims_check before letting an agent run privileged ops. For trusted in-session work, no claims call is needed.',
     category: 'claims',
     inputSchema: {
       type: 'object',
@@ -559,7 +559,7 @@ export const claimsTools: MCPTool[] = [
 
   {
     name: 'claims_steal',
-    description: 'Steal a stealable issue',
+    description: 'Steal a stealable issue Use when nothing native covers per-agent capability gating — Claude Code agents have file-system access by default. Pair claims_grant + claims_check before letting an agent run privileged ops. For trusted in-session work, no claims call is needed.',
     category: 'claims',
     inputSchema: {
       type: 'object',
@@ -633,7 +633,7 @@ export const claimsTools: MCPTool[] = [
 
   {
     name: 'claims_stealable',
-    description: 'List all stealable issues',
+    description: 'List all stealable issues Use when nothing native covers per-agent capability gating — Claude Code agents have file-system access by default. Pair claims_grant + claims_check before letting an agent run privileged ops. For trusted in-session work, no claims call is needed.',
     category: 'claims',
     inputSchema: {
       type: 'object',
@@ -672,7 +672,7 @@ export const claimsTools: MCPTool[] = [
 
   {
     name: 'claims_load',
-    description: 'Get agent load information',
+    description: 'Get agent load information Use when nothing native covers per-agent capability gating — Claude Code agents have file-system access by default. Pair claims_grant + claims_check before letting an agent run privileged ops. For trusted in-session work, no claims call is needed.',
     category: 'claims',
     inputSchema: {
       type: 'object',
@@ -763,7 +763,7 @@ export const claimsTools: MCPTool[] = [
 
   {
     name: 'claims_board',
-    description: 'Get a visual board view of all claims',
+    description: 'Get a visual board view of all claims Use when nothing native covers per-agent capability gating — Claude Code agents have file-system access by default. Pair claims_grant + claims_check before letting an agent run privileged ops. For trusted in-session work, no claims call is needed.',
     category: 'claims',
     inputSchema: {
       type: 'object',
@@ -817,7 +817,7 @@ export const claimsTools: MCPTool[] = [
 
   {
     name: 'claims_rebalance',
-    description: 'Suggest or apply load rebalancing across agents',
+    description: 'Suggest or apply load rebalancing across agents Use when nothing native covers per-agent capability gating — Claude Code agents have file-system access by default. Pair claims_grant + claims_check before letting an agent run privileged ops. For trusted in-session work, no claims call is needed.',
     category: 'claims',
     inputSchema: {
       type: 'object',

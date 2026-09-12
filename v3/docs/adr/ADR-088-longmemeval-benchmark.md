@@ -1,7 +1,7 @@
 # ADR-088: LongMemEval Benchmark for AgentDB Memory System
 
-**Status:** Accepted  
-**Date:** 2026-04-08  
+**Status:** Accepted — Partially Implemented (Phases 1–3 executed; Phase 4 publication deferred — scores below 90% target)
+**Date:** 2026-04-08 · **Updated:** 2026-05-09
 **Author:** ruflo team  
 **Relates to:** ADR-076 (Memory Bridge), ADR-077 (DiskANN), ADR-075 (Learning Pipeline)
 
@@ -183,6 +183,35 @@ Following the honesty audit standards from v3.5.71+:
 ### Risks
 - LongMemEval is a conversational memory benchmark; AgentDB is designed for agent orchestration memory — the benchmark may not test AgentDB's actual strengths
 - Over-optimizing for a benchmark can lead to benchmark gaming (Goodhart's Law)
+
+## Implementation status (2026-05-09)
+
+Phases 1–3 executed. Phase 4 (publication) deferred — Content@1 peaked at 26.8%, well below the 90% must-have target, making public leaderboard submission premature.
+
+| Phase | Status | Files | Commit(s) |
+|---|---|---|---|
+| **Phase 1** — Harness setup: ingest pipeline, agentdb-adapter, baseline-adapter, download/run scripts | Implemented | `v3/@claude-flow/memory/benchmarks/longmemeval/harness.ts`, `adapters/agentdb-adapter.ts`, `adapters/baseline-adapter.ts`, `scripts/*.sh`, `types.ts` | `b395d1255 feat: ADR-088 LongMemEval benchmark harness for AgentDB (#1566)` |
+| **Phase 2** — Retrieval parameter tuning (efSearch, M, top-k, recency weighting, BM25+RRF hybrid) | Implemented | `v3/@claude-flow/memory/benchmarks/longmemeval/` (session files + run artifacts) | `6bbbdbe2a bench(adr-088): BM25 + RRF hybrid retrieval` · `f88e99ba1 docs(adr-088): add 2026-05-01 run results` |
+| **Phase 3** — Comparative evaluation: n=500, all modes, per-category breakdown, ablations, SOTA config | Implemented | `v3/docs/adr/ADR-088-longmemeval-benchmark.md` (Run Results + Optimization Roadmap sections) | `edf5c6ed1 bench(adr-088): smart-pipeline ablations + bge-large hybrid; metric ceiling reached` · `b6ca2dd5d docs(adr-088): record smart+hybrid SOTA (C@1=26.8%, MRR=0.3269)` |
+| **Phase 3 — QA eval harness** (RAG + LLM judge, comparable to leaderboard) | Implemented | `v3/@claude-flow/memory/benchmarks/longmemeval/evaluate-qa.ts` | `cd198a5c6 bench(adr-088): wire LongMemEval QA eval harness (RAG + LLM judge)` |
+| **Phase 4** — Publish results, GitHub issue, README/CLAUDE.md update, benchmark page | **Deferred** | — | — |
+
+### Key results (SOTA config: smart hybrid hash+BM25, n=500)
+
+| Metric | Raw HNSW | Smart Hybrid (SOTA) |
+|---|---|---|
+| Session R@10 | 100.0% | 100.0% |
+| Content@1 | 22.2% | **26.8%** |
+| Content@3 | 35.8% | 37.0% |
+| MRR (content) | 0.2967 | **0.3269** |
+
+Session routing is solved (R@10 = 100%). Content-level retrieval is the gap — embedding model quality and chunking strategy are the primary levers. See Optimization Roadmap section for the tiered plan to close the gap.
+
+### Deferred items
+
+- **Phase 4 publication**: scores below the 90% must-have target; no public benchmark page or leaderboard entry created.
+- **`agentdb-hnsw-adapter.ts`**: not built — harness uses `agentdb-adapter.ts` which covers HNSW mode inline; separate HNSW adapter file was not needed in practice.
+- **`evaluate.ts` / `report.ts`** as separate modules: functionality merged into `harness.ts` and `evaluate-qa.ts` rather than split as originally planned.
 
 ## References
 

@@ -1,7 +1,8 @@
 import { FederationNode, type FederationNodeProps } from '../entities/federation-node.js';
 import { TrustLevel } from '../entities/trust-level.js';
+import type { WgManifestSection } from '../value-objects/wg-config.js';
 
-export type DiscoveryMechanism = 'static' | 'dns-sd' | 'ipfs-registry';
+export type DiscoveryMechanism = 'static' | 'dns-sd' | 'ipfs-registry' | 'a2a-card';
 
 export interface FederationManifest {
   readonly nodeId: string;
@@ -16,6 +17,13 @@ export interface FederationManifest {
   readonly version: string;
   readonly signature: string;
   readonly timestamp: string;
+  /**
+   * ADR-111 — optional WG mesh identity. Present only when the publishing
+   * node has opted into the in-tree WG layer (`config.wgMesh: true`).
+   * The Ed25519 manifest signature covers this block too — peers verifying
+   * the manifest also verify the WG-key binding.
+   */
+  readonly wg?: WgManifestSection;
 }
 
 export interface DiscoveryServiceDeps {
@@ -95,6 +103,9 @@ export class DiscoveryService {
 
   async addStaticPeer(endpoint: string, manifest?: FederationManifest): Promise<FederationNode> {
     if (manifest) {
+      if (manifest.endpoint !== endpoint) {
+        throw new Error(`Manifest endpoint mismatch: expected ${endpoint}`);
+      }
       const valid = await this.deps.verifyManifest(manifest);
       if (!valid) {
         throw new Error(`Invalid manifest signature for endpoint: ${endpoint}`);
@@ -126,6 +137,25 @@ export class DiscoveryService {
     });
 
     this.knownPeers.set(nodeId, node);
+    this.deps.onPeerDiscovered?.(node);
+    return node;
+  }
+
+  /**
+   * Register an externally-discovered peer (e.g. mapped from an A2A Agent
+   * Card via `fromAgentCard`). Unlike `addStaticPeer` this takes a fully
+   * constructed node — the caller owns validation of the external format —
+   * and the node keeps whatever trust level it was constructed with
+   * (A2A-card peers arrive UNTRUSTED). Existing peers are refreshed, not
+   * replaced, so accumulated trust state survives re-discovery.
+   */
+  registerExternalPeer(node: FederationNode): FederationNode {
+    const existing = this.knownPeers.get(node.nodeId);
+    if (existing) {
+      existing.markSeen();
+      return existing;
+    }
+    this.knownPeers.set(node.nodeId, node);
     this.deps.onPeerDiscovered?.(node);
     return node;
   }

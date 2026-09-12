@@ -4,6 +4,7 @@
  */
 
 import { EventEmitter } from 'events';
+import type { ConsensusTransport, ConsensusMessage } from './transport.js';
 import {
   ConsensusProposal,
   ConsensusVote,
@@ -35,6 +36,15 @@ export interface RaftConfig extends Partial<ConsensusConfig> {
   electionTimeoutMinMs?: number;
   electionTimeoutMaxMs?: number;
   heartbeatIntervalMs?: number;
+  /**
+   * ADR-095 G2 — optional pluggable transport. When set, RequestVote and
+   * AppendEntries RPCs go over it (request-response) and this node also
+   * answers inbound RequestVote / AppendEntries from peers using proper
+   * Raft receiver rules (term comparison, vote-once-per-term, log-up-to-date
+   * check). When unset, behavior is unchanged: the legacy in-process path
+   * mutates the local `peers` map directly (single-process).
+   */
+  transport?: ConsensusTransport;
 }
 
 export class RaftConsensus extends EventEmitter {
@@ -45,6 +55,7 @@ export class RaftConsensus extends EventEmitter {
   private electionTimeout?: NodeJS.Timeout;
   private heartbeatInterval?: NodeJS.Timeout;
   private proposalCounter: number = 0;
+  private readonly transport?: ConsensusTransport;
 
   constructor(nodeId: string, config: RaftConfig = {}) {
     super();
@@ -56,7 +67,9 @@ export class RaftConsensus extends EventEmitter {
       electionTimeoutMinMs: config.electionTimeoutMinMs ?? 150,
       electionTimeoutMaxMs: config.electionTimeoutMaxMs ?? 300,
       heartbeatIntervalMs: config.heartbeatIntervalMs ?? 50,
+      transport: config.transport,
     };
+    this.transport = config.transport;
 
     this.node = {
       id: nodeId,
@@ -66,6 +79,71 @@ export class RaftConsensus extends EventEmitter {
       commitIndex: 0,
       lastApplied: 0,
     };
+
+    if (this.transport) {
+      this.transport.onMessage(async (msg: ConsensusMessage) => this.handleInboundRaftMessage(msg));
+    }
+  }
+
+  /** Index/term of the last entry in this node's log (Raft "up-to-date" comparison). */
+  private lastLogInfo(): { index: number; term: number } {
+    const last = this.node.log[this.node.log.length - 1];
+    return last ? { index: last.index, term: last.term } : { index: 0, term: 0 };
+  }
+
+  /**
+   * ADR-095 G2 — Raft receiver. Answers inbound RequestVote / AppendEntries
+   * with proper Raft rules. Returns the RPC response the transport relays
+   * back to the caller (the transport's `send` resolves with it).
+   */
+  private async handleInboundRaftMessage(msg: ConsensusMessage): Promise<ConsensusMessage | void> {
+    const p = (msg.payload ?? {}) as Record<string, unknown>;
+    const term = typeof p.term === 'number' ? p.term : 0;
+
+    // §5.1 — any RPC with a higher term makes us a follower and adopts it.
+    if (term > this.node.currentTerm) {
+      this.node.currentTerm = term;
+      this.node.votedFor = undefined;
+      this.node.state = 'follower';
+    }
+
+    if (msg.type === 'request-vote') {
+      const candidateId = String(p.candidateId ?? msg.from);
+      const candLastIndex = typeof p.lastLogIndex === 'number' ? p.lastLogIndex : 0;
+      const candLastTerm = typeof p.lastLogTerm === 'number' ? p.lastLogTerm : 0;
+      const my = this.lastLogInfo();
+      const logOk = candLastTerm > my.term || (candLastTerm === my.term && candLastIndex >= my.index);
+      const termOk = term >= this.node.currentTerm;
+      const notVotedOrSame = this.node.votedFor === undefined || this.node.votedFor === candidateId;
+      const granted = termOk && notVotedOrSame && logOk;
+      if (granted) {
+        this.node.votedFor = candidateId;
+        this.resetElectionTimeout();
+      }
+      return { type: 'vote-response', from: this.node.id, to: msg.from, payload: { term: this.node.currentTerm, granted }, term: this.node.currentTerm };
+    }
+
+    if (msg.type === 'append-entries') {
+      // §5.2/5.3 — reject if leader's term is stale.
+      if (term < this.node.currentTerm) {
+        return { type: 'append-entries-response', from: this.node.id, to: msg.from, payload: { term: this.node.currentTerm, success: false }, term: this.node.currentTerm };
+      }
+      // Valid leader heartbeat/append → become/stay follower, reset election timer.
+      this.node.state = 'follower';
+      this.resetElectionTimeout();
+      const entries = Array.isArray(p.entries) ? (p.entries as RaftLogEntry[]) : [];
+      // (Simplified log matching: append entries not already present by index.
+      // Full prevLogIndex/prevLogTerm conflict resolution is the next refinement.)
+      for (const e of entries) {
+        if (!this.node.log.some(x => x.index === e.index)) this.node.log.push(e);
+      }
+      const leaderCommit = typeof p.leaderCommit === 'number' ? p.leaderCommit : this.node.commitIndex;
+      if (leaderCommit > this.node.commitIndex) {
+        this.node.commitIndex = Math.min(leaderCommit, this.lastLogInfo().index);
+      }
+      return { type: 'append-entries-response', from: this.node.id, to: msg.from, payload: { term: this.node.currentTerm, success: true }, term: this.node.currentTerm };
+    }
+    return;
   }
 
   async initialize(): Promise<void> {
@@ -255,17 +333,37 @@ export class RaftConsensus extends EventEmitter {
   }
 
   private async requestVote(peerId: string): Promise<boolean> {
+    // ADR-095 G2 — over the transport when wired: real RequestVote RPC.
+    if (this.transport) {
+      const my = this.lastLogInfo();
+      try {
+        const reply = await this.transport.send(peerId, {
+          type: 'request-vote',
+          payload: { term: this.node.currentTerm, candidateId: this.node.id, lastLogIndex: my.index, lastLogTerm: my.term },
+          term: this.node.currentTerm,
+        });
+        const rp = (reply?.payload ?? {}) as Record<string, unknown>;
+        // §5.1 — if the responder's term is higher, step down.
+        if (typeof rp.term === 'number' && rp.term > this.node.currentTerm) {
+          this.node.currentTerm = rp.term;
+          this.node.votedFor = undefined;
+          this.node.state = 'follower';
+          return false;
+        }
+        return rp.granted === true;
+      } catch {
+        return false; // unreachable peer / timeout — counts as no vote.
+      }
+    }
+
+    // Legacy in-process path — mutates the local fake peer state.
     const peer = this.peers.get(peerId);
     if (!peer) return false;
-
-    // Local vote request - uses in-process peer state
-    // Grant vote if candidate's term is higher
     if (this.node.currentTerm > peer.currentTerm) {
       peer.votedFor = this.node.id;
       peer.currentTerm = this.node.currentTerm;
       return true;
     }
-
     return false;
   }
 
@@ -294,17 +392,37 @@ export class RaftConsensus extends EventEmitter {
   }
 
   private async appendEntries(peerId: string, entries: RaftLogEntry[]): Promise<boolean> {
+    // ADR-095 G2 — over the transport when wired: real AppendEntries RPC.
+    if (this.transport) {
+      try {
+        const reply = await this.transport.send(peerId, {
+          type: 'append-entries',
+          payload: { term: this.node.currentTerm, leaderId: this.node.id, entries, leaderCommit: this.node.commitIndex },
+          term: this.node.currentTerm,
+        });
+        const rp = (reply?.payload ?? {}) as Record<string, unknown>;
+        if (typeof rp.term === 'number' && rp.term > this.node.currentTerm) {
+          this.node.currentTerm = rp.term;
+          this.node.votedFor = undefined;
+          this.node.state = 'follower';
+          if (this.heartbeatInterval) { clearInterval(this.heartbeatInterval); this.heartbeatInterval = undefined; }
+          return false;
+        }
+        return rp.success === true;
+      } catch {
+        return false; // unreachable peer / timeout.
+      }
+    }
+
+    // Legacy in-process path.
     const peer = this.peers.get(peerId);
     if (!peer) return false;
-
-    // AppendEntries - local peer state update
     if (this.node.currentTerm >= peer.currentTerm) {
       peer.currentTerm = this.node.currentTerm;
       peer.state = 'follower';
       peer.log.push(...entries);
       return true;
     }
-
     return false;
   }
 

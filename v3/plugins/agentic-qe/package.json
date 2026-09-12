@@ -1,6 +1,6 @@
 {
   "name": "@claude-flow/plugin-agentic-qe",
-  "version": "3.5.59",
+  "version": "3.0.0-alpha.5",
   "description": "Quality Engineering plugin for Ruflo V3 with 51 specialized agents across 12 DDD bounded contexts",
   "type": "module",
   "main": "./dist/index.js",

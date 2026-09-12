@@ -28,7 +28,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci --legacy-peer-deps
+        uses: ./.github/actions/npm-ci-retry
 
       - name: Run security audit
         run: |
@@ -70,23 +70,21 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci --legacy-peer-deps
+        uses: ./.github/actions/npm-ci-retry
 
       - name: Run all tests
-        run: npm test || echo "⚠️ Some tests failed (Jest teardown issues - non-blocking)"
-        continue-on-error: true
-
-      - name: Generate coverage report
-        if: matrix.os == 'ubuntu-latest'
-        run: npm run test:coverage || echo "⚠️ Coverage generation failed (non-blocking)"
-        continue-on-error: true
+        # #3030: the historical suite has known debt, but new failing files
+        # are release-blocking. The committed file-level baseline may only
+        # shrink; replacing an old failure with a new one still fails.
+        run: node scripts/ci-test-ratchet.mjs
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ matrix.os }}
-          path: coverage/
+          path: .test-results/vitest.json
+          if-no-files-found: error
 
   # Documentation generation
   docs:
@@ -137,11 +135,21 @@ jobs:
 
       - name: Install dependencies
         run: |
-          if [ "${{ runner.os }}" == "Linux" ]; then
-            npm ci --legacy-peer-deps
-          else
-            npm ci --legacy-peer-deps --omit=optional || npm ci --legacy-peer-deps --force
-          fi
+          # Retries absorb the transient sharp/libvips "socket hang up" /
+          # 503 download flake (see .github/actions/npm-ci-retry) — this
+          # step predates that composite action and can't call it directly
+          # since it needs the OS-conditional --omit=optional fallback too.
+          for attempt in 1 2 3; do
+            if [ "${{ runner.os }}" == "Linux" ]; then
+              npm ci --legacy-peer-deps && exit 0
+            else
+              (npm ci --legacy-peer-deps --omit=optional || npm ci --legacy-peer-deps --force) && exit 0
+            fi
+            echo "npm ci failed (attempt $attempt/3) — retrying in 15s"
+            sleep 15
+          done
+          echo "npm ci failed after 3 attempts"
+          exit 1
         shell: bash
 
       - name: Build project
@@ -161,6 +169,84 @@ jobs:
         run: |
           node ./v3/@claude-flow/cli/bin/cli.js --version
         continue-on-error: true
+
+      - name: Daemon survives parent exit (Windows, regression #1766)
+        if: runner.os == 'Windows'
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          # We install the published `@claude-flow/cli@alpha` inside an isolated
+          # temp dir rather than running the source-tree CLI directly, because
+          # the source-tree CLI imports the sibling workspace package
+          # `@claude-flow/cli-core` (split out in #1764) which isn't always
+          # resolvable from a source checkout. Skipping the `ruflo` umbrella
+          # (just a thin wrapper) keeps the install footprint smaller on the
+          # cold-cache Windows runner.
+          $ErrorActionPreference = 'Stop'
+          $tmp = Join-Path $env:RUNNER_TEMP 'daemon-1766'
+          if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+          New-Item -ItemType Directory -Path $tmp | Out-Null
+          Set-Location $tmp
+
+          Write-Host "::group::Phase 1: install @claude-flow/cli@alpha"
+          $installSw = [System.Diagnostics.Stopwatch]::StartNew()
+          npm init -y | Out-Null
+          npm install '@claude-flow/cli@alpha' --no-audit --no-fund --omit=optional --omit=dev
+          $installSw.Stop()
+          Write-Host "Install took $($installSw.Elapsed.TotalSeconds)s"
+          $cli = Join-Path $tmp 'node_modules/@claude-flow/cli/bin/cli.js'
+          if (-not (Test-Path $cli)) { throw "CLI not found at $cli after npm install" }
+          $cliVer = (Get-Content (Join-Path $tmp 'node_modules/@claude-flow/cli/package.json') | ConvertFrom-Json).version
+          Write-Host "Testing daemon survival for @claude-flow/cli@$cliVer"
+          Write-Host "::endgroup::"
+
+          Write-Host "::group::Phase 2: spawn daemon via cmd.exe (parent exits when node returns)"
+          # Use raw .NET Process.Start with cmd.exe /c as the spawn parent.
+          # cmd.exe is a clean Windows parent that exits the moment node exits,
+          # giving us a deterministic "parent gone" signal — without the PS7
+          # `Start-Process -Wait -NoNewWindow -RedirectStandard*` hang where
+          # the parent waits indefinitely on output streams it inherited.
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = 'cmd.exe'
+          $psi.Arguments = "/c node `"$cli`" daemon start"
+          $psi.UseShellExecute = $false
+          $psi.CreateNoWindow = $true
+          $psi.WorkingDirectory = $tmp
+          # No stdio redirect — let cmd inherit nothing meaningful, daemon's
+          # fork() opts use stdio:'ignore' anyway so nothing leaks back here.
+          $spawnSw = [System.Diagnostics.Stopwatch]::StartNew()
+          $proc = [System.Diagnostics.Process]::Start($psi)
+          if (-not $proc.WaitForExit(120000)) {
+            $proc.Kill($true)
+            throw "FAIL: cmd.exe parent did not exit in 120s — daemon start hung"
+          }
+          $spawnSw.Stop()
+          Write-Host "cmd.exe parent exited in $($spawnSw.Elapsed.TotalSeconds)s with code $($proc.ExitCode)"
+          Write-Host "::endgroup::"
+
+          Write-Host "::group::Phase 3: verify daemon survives parent exit"
+          $pidFile = Join-Path $tmp '.claude-flow/daemon.pid'
+          if (-not (Test-Path $pidFile)) {
+            throw "FAIL: pid file $pidFile was never written — daemon failed to start"
+          }
+          $daemonPid = (Get-Content $pidFile).Trim()
+          Write-Host "Daemon recorded PID = $daemonPid"
+
+          # Original #1766 symptom: daemon died within ~1s of parent exit.
+          # Wait 5s — well past any plausible delayed-teardown race.
+          Start-Sleep -Seconds 5
+          $alive = Get-Process -Id $daemonPid -ErrorAction SilentlyContinue
+          if ($null -eq $alive) {
+            throw "FAIL: daemon PID $daemonPid is no longer running 5s after parent exit (regression of #1766 in @claude-flow/cli@$cliVer)"
+          }
+          Write-Host "PASS: daemon PID $daemonPid alive 5s after parent exit (@claude-flow/cli@$cliVer)"
+          Write-Host "::endgroup::"
+
+          Write-Host "::group::Phase 4: cleanup"
+          # Force-kill is fine here (CI ephemeral runner) — saves time vs the
+          # interactive `daemon stop` path which on Windows shells out to ps/grep.
+          Stop-Process -Id $daemonPid -Force -ErrorAction SilentlyContinue
+          Write-Host "::endgroup::"
 
       - name: Package build
         run: |

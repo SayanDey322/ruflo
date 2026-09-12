@@ -112,7 +112,7 @@ export const coderAgentPlugin = new PluginBuilder('coder-agent', '3.0.0')
       description: 'Writes clean, efficient code following best practices',
       capabilities: ['code-generation', 'refactoring', 'debugging'],
       systemPrompt: 'You are an expert software engineer...',
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       temperature: 0.3,
     },
   ])
@@ -132,7 +132,7 @@ export const testerAgentPlugin = new PluginBuilder('tester-agent', '3.0.0')
       description: 'Writes comprehensive tests and validates code quality',
       capabilities: ['unit-testing', 'integration-testing', 'test-coverage'],
       systemPrompt: 'You are an expert QA engineer...',
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       temperature: 0.2,
     },
   ])
@@ -152,7 +152,7 @@ export const reviewerAgentPlugin = new PluginBuilder('reviewer-agent', '3.0.0')
       description: 'Reviews code for quality, security, and best practices',
       capabilities: ['code-review', 'security-audit', 'performance-review'],
       systemPrompt: 'You are an expert code reviewer...',
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       temperature: 0.1,
     },
   ])
@@ -420,7 +420,7 @@ export const coordinatorAgentPlugin = new PluginBuilder('coordinator-agent', '3.
       description: 'Coordinates multi-agent swarm operations',
       capabilities: ['task-distribution', 'progress-tracking', 'conflict-resolution'],
       systemPrompt: 'You are a swarm coordinator...',
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       temperature: 0.2,
     },
   ])

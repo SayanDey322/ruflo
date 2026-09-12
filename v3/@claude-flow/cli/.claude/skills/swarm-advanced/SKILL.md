@@ -1,10 +1,7 @@
 ---
 name: swarm-advanced
-description: Advanced swarm orchestration patterns for research, development, testing, and complex distributed workflows
-version: 2.0.0
-category: orchestration
-tags: [swarm, distributed, parallel, research, testing, development, coordination]
-author: Claude Flow Team
+description: |
+  Advanced swarm orchestration patterns for research, development, testing, and complex distributed workflows
 ---
 
 # Advanced Swarm Orchestration
@@ -240,7 +237,7 @@ mcp__claude-flow__workflow_execute({
 ### CLI Fallback
 ```bash
 # Quick research swarm
-npx claude-flow swarm "research AI trends in 2025" \
+npx @claude-flow/cli@latest swarm "research AI trends in 2025" \
   --strategy research \
   --mode distributed \
   --max-agents 6 \
@@ -384,7 +381,7 @@ mcp__claude-flow__pipeline_create({
 ### CLI Fallback
 ```bash
 # Quick development swarm
-npx claude-flow swarm "build REST API with authentication" \
+npx @claude-flow/cli@latest swarm "build REST API with authentication" \
   --strategy development \
   --mode hierarchical \
   --monitor \
@@ -584,7 +581,7 @@ mcp__claude-flow__trend_analysis({
 ### CLI Fallback
 ```bash
 # Quick testing swarm
-npx claude-flow swarm "test application comprehensively" \
+npx @claude-flow/cli@latest swarm "test application comprehensively" \
   --strategy testing \
   --mode star \
   --parallel \

@@ -44,3 +44,10 @@ Telemetry and anomalies are persisted to AgentDB with vector indexing:
 - **Readings**: `iot-telemetry` namespace, tagged by device and fleet
 - **Anomalies**: `iot-telemetry-anomalies` namespace, tagged by type and action
 - **Vector search**: HNSW-indexed similarity search across telemetry vectors (M=16, efConstruction=200)
+
+### Neural Learning
+
+After each analysis pass, feed the telemetry baseline learning so future Z-score thresholds adapt:
+```bash
+npx @claude-flow/cli@latest hooks post-task --task-id "TASK_ID" --success true --train-neural true
+```

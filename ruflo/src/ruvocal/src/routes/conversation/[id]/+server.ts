@@ -130,6 +130,7 @@ export async function POST({ request, locals, params, getClientAddress }) {
 		selectedMcpServerNames,
 		selectedMcpServers,
 		autopilot,
+		autopilotMaxSteps,
 	} = z
 		.object({
 			id: z.string().uuid().refine(isMessageId).optional(), // parent message id to append to for a normal message, or the message id for a retry/continue
@@ -141,6 +142,8 @@ export async function POST({ request, locals, params, getClientAddress }) {
 			),
 			is_retry: z.optional(z.boolean()),
 			autopilot: z.optional(z.boolean()),
+			// User-configurable cap on autopilot tool-call loops. Server clamps to [1, 100].
+			autopilotMaxSteps: z.optional(z.number().int().min(1).max(100)),
 			selectedMcpServerNames: z.optional(z.array(z.string())),
 			selectedMcpServers: z
 				.optional(
@@ -575,6 +578,7 @@ export async function POST({ request, locals, params, getClientAddress }) {
 					locals,
 					abortController: ctrl,
 					autopilot: autopilot === true,
+					autopilotMaxSteps,
 				};
 				// run the text generation and send updates to the client
 				for await (const event of textGeneration(ctx)) await update(event);

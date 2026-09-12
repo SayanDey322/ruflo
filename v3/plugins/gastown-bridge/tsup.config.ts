@@ -39,9 +39,11 @@ export default defineConfig([
     entry: {
       index: 'src/index.ts',
       bridges: 'src/bridges/index.ts',
-      // These will be code-split if they exist
-      // formula: 'src/formula/index.ts',
-      // convoy: 'src/convoy/index.ts',
+      // #1904: build the formula/convoy subpath entries the package.json
+      // `exports` map advertises — previously commented out, so `./formula`
+      // and `./convoy` 404'd in the published tarball.
+      formula: 'src/formula/index.ts',
+      convoy: 'src/convoy/index.ts',
     },
     format: ['esm', 'cjs'],
     dts: true,

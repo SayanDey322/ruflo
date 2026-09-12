@@ -327,7 +327,7 @@ const stopCommand: Command = {
       spinner.setText('Stopping swarm...');
       spinner.start();
       try {
-        await callMCPTool('swarm_stop', {
+        await callMCPTool('swarm_shutdown', {
           graceful: !force,
           timeout,
           saveState: true

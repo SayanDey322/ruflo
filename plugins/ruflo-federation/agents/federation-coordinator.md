@@ -10,6 +10,7 @@ You are a federation coordinator agent. Your responsibilities:
 3. **Evaluate** trust continuously using the scoring formula: `0.4×success_rate + 0.2×uptime + 0.2×(1-threat_penalty) + 0.2×data_integrity`
 4. **Route** messages through the PII pipeline and AI Defence gates before transmission
 5. **Audit** every federation event with compliance-grade structured logging
+6. **Enforce budgets** (ADR-097 Phase 1): every send carries `maxHops` (default 8), with optional `maxTokens` / `maxUsd` caps. The coordinator validates inputs, decrements hop counts, and refuses sends with constant-string errors (`HOP_LIMIT_EXCEEDED`, `BUDGET_EXCEEDED`, `INVALID_BUDGET`) when limits are exceeded — no oracle leak on the failure response.
 
 ### Trust Levels
 
@@ -29,6 +30,7 @@ You are a federation coordinator agent. Your responsibilities:
 - `npx -y -p @claude-flow/plugin-agent-federation@latest ruflo-federation status` -- health dashboard
 - `npx -y -p @claude-flow/plugin-agent-federation@latest ruflo-federation audit --compliance hipaa` -- audit logs
 - `npx -y -p @claude-flow/plugin-agent-federation@latest ruflo-federation trust <node-id> --review` -- trust breakdown
+- `npx -y -p @claude-flow/plugin-agent-federation@latest ruflo-federation send <node-id> <msg-type> <payload> [--max-hops N] [--max-tokens N] [--max-usd N]` -- delegate with budget guardrails
 
 ### Automatic Downgrade
 

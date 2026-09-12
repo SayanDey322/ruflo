@@ -65,6 +65,7 @@ async function* textGenerationWithoutTitle(
 			abortController: ctx.abortController,
 			promptedAt: ctx.promptedAt,
 			autopilot: ctx.autopilot,
+			autopilotMaxSteps: ctx.autopilotMaxSteps,
 		});
 
 		let step = await mcpGen.next();

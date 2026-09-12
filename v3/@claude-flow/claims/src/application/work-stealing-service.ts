@@ -171,13 +171,30 @@ export class InMemoryWorkStealingEventBus implements IWorkStealingEventBus {
  */
 export class WorkStealingService implements IWorkStealingService {
   private readonly config: WorkStealingConfig;
+  // ADR-101 Component A: optional HLC for skew-tolerant time comparisons
+  // across federated nodes. Single-node deployments leave this undefined and
+  // continue to use Date.now() — preserving backwards compatibility.
+  private readonly hlc: import('../infrastructure/hlc.js').IHlc | undefined;
 
   constructor(
     private readonly repository: IIssueClaimRepository,
     private readonly eventBus: IWorkStealingEventBus,
-    config: Partial<WorkStealingConfig> = {}
+    config: Partial<WorkStealingConfig> = {},
+    hlc?: import('../infrastructure/hlc.js').IHlc,
   ) {
     this.config = { ...DEFAULT_WORK_STEALING_CONFIG, ...config };
+    this.hlc = hlc;
+  }
+
+  /**
+   * Get the current "now" as an epoch ms.
+   *
+   * When an HLC is wired in (federated mode), use its physicalMs which is
+   * monotonic across the federation. Otherwise fall back to wall clock.
+   */
+  private nowMs(): number {
+    if (this.hlc) return this.hlc.now().physicalMs;
+    return Date.now();
   }
 
   // ===========================================================================
@@ -354,8 +371,9 @@ export class WorkStealingService implements IWorkStealingService {
       throw new Error('Contest has already been resolved');
     }
 
-    const now = new Date();
-    if (now > claim.contestInfo.windowEndsAt) {
+    const nowMs = this.nowMs();
+    const windowEndsAtMs = new Date(claim.contestInfo.windowEndsAt).getTime();
+    if (nowMs > windowEndsAtMs) {
       throw new Error('Contest window has expired');
     }
 
@@ -366,7 +384,7 @@ export class WorkStealingService implements IWorkStealingService {
 
     // Update contest info with reason
     claim.contestInfo.reason = reason;
-    claim.contestInfo.contestedAt = now;
+    claim.contestInfo.contestedAt = new Date(nowMs);
 
     await this.repository.update(claim);
 
@@ -539,9 +557,9 @@ export class WorkStealingService implements IWorkStealingService {
    */
   private isInGracePeriodWithConfig(claim: IssueClaimWithStealing, config: WorkStealingConfig): boolean {
     const gracePeriodMs = config.gracePeriodMinutes * 60 * 1000;
-    const now = new Date();
-    const claimedAt = new Date(claim.claimedAt);
-    return now.getTime() - claimedAt.getTime() < gracePeriodMs;
+    const nowMs = this.nowMs();
+    const claimedAtMs = new Date(claim.claimedAt).getTime();
+    return nowMs - claimedAtMs < gracePeriodMs;
   }
 
   /**

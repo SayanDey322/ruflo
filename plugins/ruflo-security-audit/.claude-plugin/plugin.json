@@ -1,7 +1,7 @@
 {
   "name": "ruflo-security-audit",
   "description": "Security review, dependency scanning, policy gates, and CVE monitoring",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "author": {
     "name": "ruvnet",
     "url": "https://github.com/ruvnet"
@@ -13,6 +13,10 @@
     "security",
     "audit",
     "cve",
-    "scanning"
+    "scanning",
+    "mcp",
+    "cve-monitoring",
+    "policy-gates",
+    "shell-injection"
   ]
 }

@@ -51,12 +51,14 @@ export async function* runMcpFlow({
 	abortController,
 	promptedAt,
 	autopilot,
+	autopilotMaxSteps,
 }: RunMcpFlowContext & {
 	preprompt?: string;
 	abortSignal?: AbortSignal;
 	abortController?: AbortController;
 	promptedAt?: Date;
 	autopilot?: boolean;
+	autopilotMaxSteps?: number;
 }): AsyncGenerator<MessageUpdate, McpFlowResult, undefined> {
 	// Helper to check if generation should be aborted via DB polling
 	// Also triggers the abort controller to cancel active streams/requests
@@ -460,7 +462,14 @@ export async function* runMcpFlow({
 			);
 		}
 
-		const maxLoops = autopilot ? 30 : 10;
+		// Autopilot loop cap is user-configurable (Settings.autopilotMaxSteps);
+		// fall back to 30 for back-compat when the client doesn't send a value.
+		// Non-autopilot mode keeps a tight 10-loop safety net regardless of caller input.
+		const autopilotCap =
+			typeof autopilotMaxSteps === "number" && autopilotMaxSteps > 0
+				? Math.min(autopilotMaxSteps, 100)
+				: 30;
+		const maxLoops = autopilot ? autopilotCap : 10;
 		for (let loop = 0; loop < maxLoops; loop += 1) {
 			// Check for abort at the start of each loop iteration
 			if (checkAborted()) {

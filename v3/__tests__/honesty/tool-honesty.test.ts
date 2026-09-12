@@ -22,6 +22,36 @@ function readSource(relativePath: string): string {
   return readFileSync(fullPath, 'utf-8');
 }
 
+// Helper: extract the body of a tool block starting at `name: '<toolName>'`.
+// Walks backward to the outer `{` that opens the tool object, then forward
+// counting braces until that outer object closes. Returns the full tool
+// block regardless of how long the handler body has grown.
+function extractToolBlock(source: string, toolName: string, maxChars = 100_000): string {
+  const namePos = source.indexOf(`name: '${toolName}'`);
+  if (namePos < 0) return '';
+
+  // Walk backward to find the `{` that opens the tool object. Skip over
+  // earlier inner braces (e.g. block comments don't matter; inputSchema/
+  // handler bodies appear AFTER name, not before).
+  let openBrace = namePos;
+  while (openBrace > 0 && source[openBrace] !== '{') openBrace--;
+  if (source[openBrace] !== '{') return source.slice(namePos, namePos + maxChars);
+
+  // Walk forward from openBrace counting depth. Brace at openBrace = depth 1.
+  // Bound the scan by maxChars so a malformed file can't hang the test.
+  const end = Math.min(source.length, openBrace + maxChars);
+  let depth = 0;
+  for (let i = openBrace; i < end; i++) {
+    const ch = source[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return source.slice(openBrace, i + 1);
+    }
+  }
+  return source.slice(openBrace, end);
+}
+
 // Helper: find all Math.random() usages and classify them
 function findMathRandomUsages(source: string): { line: number; text: string; isIdGeneration: boolean }[] {
   const lines = source.split('\n');
@@ -167,7 +197,7 @@ describe('Tool Honesty (v3.5.56-57)', () => {
       const resetStart = source.indexOf("name: 'system_reset'");
       expect(resetStart).toBeGreaterThan(-1);
 
-      const handlerSection = source.slice(resetStart, resetStart + 1000);
+      const handlerSection = extractToolBlock(source, 'system_reset');
 
       // Should use real os functions, not hardcoded values
       expect(handlerSection).toContain('os.loadavg()');
@@ -182,7 +212,7 @@ describe('Tool Honesty (v3.5.56-57)', () => {
     it('should use os.totalmem() and os.freemem() for memory values', () => {
       const source = readSource('system-tools.ts');
       const resetStart = source.indexOf("name: 'system_reset'");
-      const handlerSection = source.slice(resetStart, resetStart + 1000);
+      const handlerSection = extractToolBlock(source, 'system_reset');
 
       // Verify memory is computed from os module
       expect(handlerSection).toContain('os.totalmem()');
@@ -208,7 +238,7 @@ describe('Tool Honesty (v3.5.56-57)', () => {
       expect(attentionStart).toBeGreaterThan(-1);
 
       // Get the handler section (up to the next major section marker)
-      const handlerSection = source.slice(attentionStart, attentionStart + 4000);
+      const handlerSection = extractToolBlock(source, 'hooks_intelligence_attention');
 
       // When no real implementation worked, results should be empty
       expect(handlerSection).toContain("implementation = 'none'");
@@ -224,7 +254,7 @@ describe('Tool Honesty (v3.5.56-57)', () => {
     it('should mark _stub as true when no backend is available', () => {
       const source = readSource('hooks-tools.ts');
       const attentionStart = source.indexOf("name: 'hooks_intelligence_attention'");
-      const handlerSection = source.slice(attentionStart, attentionStart + 4000);
+      const handlerSection = extractToolBlock(source, 'hooks_intelligence_attention');
 
       // The stats object should indicate stub status when implementation is 'none'
       expect(handlerSection).toContain("_stub: implementation === 'none'");
@@ -232,11 +262,22 @@ describe('Tool Honesty (v3.5.56-57)', () => {
 
     it('should not generate fake speedup claims when no backend is available', () => {
       const source = readSource('hooks-tools.ts');
-      const attentionStart = source.indexOf("name: 'hooks_intelligence_attention'");
-      const handlerSection = source.slice(attentionStart, attentionStart + 4000);
+      const handlerSection = extractToolBlock(source, 'hooks_intelligence_attention');
 
-      // Speedup should be null when implementation is not real
-      expect(handlerSection).toMatch(/speedup:.*implementation\.startsWith\('real-'\)/);
+      // Honesty principle: don't fabricate a speedup claim. The handler can
+      // satisfy this two ways:
+      //   (a) Have no speedup field at all (current implementation — no
+      //       claim is made when there's no real backend).
+      //   (b) Have a speedup field gated by implementation.startsWith('real-')
+      //       so it only emits a value when real work happened.
+      // Both pass; only an UNCONDITIONAL speedup claim should fail.
+      const speedupRegex = /\bspeedup\s*:/m;
+      const hasSpeedupField = speedupRegex.test(handlerSection);
+      if (hasSpeedupField) {
+        expect(handlerSection).toMatch(/speedup\s*:[^,}]*implementation\.startsWith\('real-'\)/);
+      }
+      // Always verify no fabricated number literal is unconditionally returned.
+      expect(handlerSection).not.toMatch(/speedup\s*:\s*[\d.]+/m);
     });
   });
 
@@ -333,7 +374,7 @@ describe('Tool Honesty (v3.5.56-57)', () => {
       const reportStart = source.indexOf("name: 'performance_report'");
       expect(reportStart).toBeGreaterThan(-1);
 
-      const handlerSection = source.slice(reportStart, reportStart + 2000);
+      const handlerSection = extractToolBlock(source, 'performance_report');
 
       expect(handlerSection).toContain('process.memoryUsage()');
       expect(handlerSection).toContain('process.cpuUsage()');
@@ -354,7 +395,7 @@ describe('Tool Honesty (v3.5.56-57)', () => {
       const benchmarkStart = source.indexOf("name: 'performance_benchmark'");
       expect(benchmarkStart).toBeGreaterThan(-1);
 
-      const handlerSection = source.slice(benchmarkStart, benchmarkStart + 3000);
+      const handlerSection = extractToolBlock(source, 'performance_benchmark');
 
       // Should use performance.now() for real timing
       expect(handlerSection).toContain('performance.now()');
@@ -372,7 +413,7 @@ describe('Tool Honesty (v3.5.56-57)', () => {
       const profileStart = source.indexOf("name: 'performance_profile'");
       expect(profileStart).toBeGreaterThan(-1);
 
-      const handlerSection = source.slice(profileStart, profileStart + 5000);
+      const handlerSection = extractToolBlock(source, 'performance_profile');
       expect(handlerSection).not.toContain('_stub: true');
       expect(handlerSection).toContain('_real: true');
     });
@@ -382,7 +423,7 @@ describe('Tool Honesty (v3.5.56-57)', () => {
       const optimizeStart = source.indexOf("name: 'performance_optimize'");
       expect(optimizeStart).toBeGreaterThan(-1);
 
-      const handlerSection = source.slice(optimizeStart, optimizeStart + 5000);
+      const handlerSection = extractToolBlock(source, 'performance_optimize');
       expect(handlerSection).not.toContain('_stub: true');
       expect(handlerSection).toContain('_real: true');
     });
@@ -392,7 +433,7 @@ describe('Tool Honesty (v3.5.56-57)', () => {
       const bottleneckStart = source.indexOf("name: 'performance_bottleneck'");
       expect(bottleneckStart).toBeGreaterThan(-1);
 
-      const handlerSection = source.slice(bottleneckStart, bottleneckStart + 5000);
+      const handlerSection = extractToolBlock(source, 'performance_bottleneck');
       expect(handlerSection).not.toContain('_stub: true');
       expect(handlerSection).toContain('_real: true');
     });

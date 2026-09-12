@@ -3,12 +3,30 @@
  * Includes rollback capability
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { UpdateCheckResult } from './checker.js';
 import { validateUpdate, ValidationResult } from './validator.js';
+
+/**
+ * audit_1776853149979: package name and version come from npm-view output and
+ * the update-history.json file (writable by anyone with FS access). Both
+ * previously interpolated straight into a shell string for `npm install`.
+ * These regexes pre-flight values so a hostile package name can't slip
+ * shell metacharacters through, even though execFileSync below already
+ * eliminates the shell.
+ */
+// First char of the unscoped name forbids `-` to defang CLI-flag confusion
+// when the spec is passed to npm (npm install -evil@1.0.0 looks flag-shaped).
+const SAFE_PKG_RE = /^(@[a-zA-Z0-9_\-]+\/)?[a-zA-Z0-9_][a-zA-Z0-9_\-.]{0,213}$/;
+// semver / dist-tag / range chars only — no shell metas.
+const SAFE_VERSION_RE = /^[a-zA-Z0-9._\-+~^*xX]{1,64}$/;
+
+export function isSafePackageSpec(pkg: string, version: string): boolean {
+  return SAFE_PKG_RE.test(pkg) && SAFE_VERSION_RE.test(version);
+}
 
 export interface UpdateHistoryEntry {
   timestamp: string;
@@ -95,15 +113,31 @@ export async function executeUpdate(
     };
   }
 
-  try {
-    // Execute npm install
-    const installCmd = `npm install ${update.package}@${update.latestVersion} --save-exact`;
+  // audit_1776853149979: validate package + version regex before any exec.
+  if (!isSafePackageSpec(update.package, update.latestVersion)) {
+    return {
+      success: false,
+      package: update.package,
+      version: update.latestVersion,
+      error: `Refusing to install: package or version contains disallowed characters (pkg="${update.package}", version="${update.latestVersion}")`,
+      validation,
+    };
+  }
 
-    execSync(installCmd, {
-      encoding: 'utf-8',
-      stdio: 'pipe',
-      timeout: 60000, // 1 minute timeout
-    });
+  try {
+    // audit_1776853149979: switched to execFileSync('npm', argv) — no shell,
+    // so even if validation regressed, metas in update.package would stay
+    // literal in the argv slot.
+    execFileSync(
+      'npm',
+      ['install', `${update.package}@${update.latestVersion}`, '--save-exact'],
+      {
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        timeout: 60000, // 1 minute timeout
+        shell: false,
+      },
+    );
 
     // Record successful update
     recordUpdate({
@@ -196,15 +230,27 @@ export async function rollbackUpdate(
     };
   }
 
-  try {
-    // Install the previous version
-    const installCmd = `npm install ${lastUpdate.package}@${lastUpdate.fromVersion} --save-exact`;
+  // audit_1776853149979: history entries can be tampered with by anyone who
+  // can write update-history.json — gate before exec.
+  if (!isSafePackageSpec(lastUpdate.package, lastUpdate.fromVersion)) {
+    return {
+      success: false,
+      message: `Refusing to rollback: package or version contains disallowed characters (pkg="${lastUpdate.package}", version="${lastUpdate.fromVersion}")`,
+    };
+  }
 
-    execSync(installCmd, {
-      encoding: 'utf-8',
-      stdio: 'pipe',
-      timeout: 60000,
-    });
+  try {
+    // execFileSync, no shell.
+    execFileSync(
+      'npm',
+      ['install', `${lastUpdate.package}@${lastUpdate.fromVersion}`, '--save-exact'],
+      {
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        timeout: 60000,
+        shell: false,
+      },
+    );
 
     // Record the rollback
     recordUpdate({

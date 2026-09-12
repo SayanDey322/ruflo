@@ -381,6 +381,8 @@ export async function checkContent(
   try {
     const response = await fetch(`${gateway}/ipfs/${cid}`, {
       method: 'HEAD',
+      // audit_1776853149979: HEAD probe should never hang; 10s upper bound.
+      signal: AbortSignal.timeout(10000),
     });
 
     if (response.ok) {

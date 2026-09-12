@@ -22,7 +22,13 @@ afterAll(() => {
   client.close();
 });
 
-describe.sequential('SeedClient against real device', () => {
+// Skip when no Cognitum Seed device is reachable (no SEED_ENDPOINT or
+// SEED_PAIRING_TOKEN configured). These are integration tests against
+// real hardware — they time out at 30s when nothing answers, which is
+// the wrong signal in CI.
+const __SEED_ENABLED = !!process.env.SEED_PAIRING_TOKEN && !!process.env.SEED_ENDPOINT;
+
+describe.skipIf(!__SEED_ENABLED).sequential('SeedClient against real device', () => {
   it('client.status() returns device info', async () => {
     const s = await client.status();
     expect(s.device_id).toBe('ecaf97dd-fc90-4b0e-b0e7-e9f896b9fbb6');

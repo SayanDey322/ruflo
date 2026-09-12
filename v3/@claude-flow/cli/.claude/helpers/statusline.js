@@ -1,14 +1,45 @@
 #!/usr/bin/env node
 /**
- * RuFlo V3.5 Statusline Generator
- * Displays real-time V3 implementation progress and system status
+ * RuFlo Statusline Generator
+ * Displays real-time V3 implementation progress and system status.
+ * Version is read from the installed @claude-flow/cli package.json at
+ * runtime — #1892 fix: previously hardcoded to V3.5 which drifted from
+ * the actual installed alpha series.
  *
  * Usage: node statusline.js [--json] [--compact]
  */
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
+
+// #1892 — derive RuFlo banner version from the installed cli package.json
+// so the statusline never drifts from `ruflo doctor`. Falls back to a
+// generic "RuFlo" label only if every resolution path fails.
+function resolveBannerVersion() {
+  const candidates = [
+    // Local-checkout / monorepo case
+    path.join(__dirname, '..', '..', 'package.json'),
+    // npm-installed-as-dep case
+    path.join(__dirname, '..', '..', '..', '@claude-flow', 'cli', 'package.json'),
+    // npm-installed-globally case
+    path.join(__dirname, '..', '..', '..', 'cli', 'package.json'),
+  ];
+  for (const p of candidates) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      if (pkg.name && pkg.name.includes('claude-flow') && typeof pkg.version === 'string') {
+        // Render as "V<major>.<minor>" so the banner stays compact —
+        // patch+pre-release detail still shows under `doctor`.
+        const m = pkg.version.match(/^(\d+)\.(\d+)/);
+        if (m) return `V${m[1]}.${m[2]}`;
+        return `V${pkg.version}`;
+      }
+    } catch {/* try next */}
+  }
+  return ''; // empty → header just says "RuFlo"
+}
+const BANNER_VERSION = resolveBannerVersion();
 
 // Configuration
 const CONFIG = {
@@ -49,12 +80,17 @@ function getUserInfo() {
   let gitBranch = '';
   let modelName = 'Opus 4.6 (1M context)';
 
+  // audit_1776853149979: previously used execSync with a shell string for git
+  // commands. Switched to execFileSync('git', argv) so there is no shell
+  // interpretation — eliminates the *class* of injection regardless of whether
+  // user input ever reaches these args (defense in depth). Errors are caught
+  // and the defaults above remain.
   try {
-    name = execSync('git config user.name 2>/dev/null || echo "user"', { encoding: 'utf-8' }).trim();
-    gitBranch = execSync('git branch --show-current 2>/dev/null || echo ""', { encoding: 'utf-8' }).trim();
-  } catch (e) {
-    // Ignore errors
-  }
+    name = execFileSync('git', ['config', 'user.name'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || 'user';
+  } catch { /* not in a repo / no name set — keep default */ }
+  try {
+    gitBranch = execFileSync('git', ['branch', '--show-current'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch { /* not in a repo — keep empty */ }
 
   return { name, gitBranch, modelName };
 }
@@ -131,39 +167,27 @@ function getV3Progress() {
 
 // Get security status based on actual scans
 function getSecurityStatus() {
-  // Check for security scan results in memory
+  // ponytail: read the NEWEST scan in .claude/security-scans/ and surface its
+  // real findings count. Previously hardcoded totalCves=3 and counted scan
+  // *files* as "CVEs fixed", fabricating "⚠ 3 CVEs" for every project.
   const scanResultsPath = path.join(process.cwd(), '.claude', 'security-scans');
-  let cvesFixed = 0;
-  const totalCves = 3;
-
-  if (fs.existsSync(scanResultsPath)) {
-    try {
-      const scans = fs.readdirSync(scanResultsPath).filter(f => f.endsWith('.json'));
-      // Each successful scan file = 1 CVE addressed
-      cvesFixed = Math.min(totalCves, scans.length);
-    } catch (e) {
-      // Ignore
+  if (!fs.existsSync(scanResultsPath)) return { status: 'PENDING', findings: 0, cvesFixed: 0, totalCves: 0 };
+  try {
+    const files = fs.readdirSync(scanResultsPath).filter(f => f.endsWith('.json'));
+    if (files.length === 0) return { status: 'PENDING', findings: 0, cvesFixed: 0, totalCves: 0 };
+    let newest = files[0];
+    let newestMtime = -1;
+    for (const f of files) {
+      const st = fs.statSync(path.join(scanResultsPath, f));
+      if (st.mtimeMs > newestMtime) { newestMtime = st.mtimeMs; newest = f; }
     }
+    const scan = JSON.parse(fs.readFileSync(path.join(scanResultsPath, newest), 'utf-8'));
+    const findings = Math.max(0, scan.summary?.total ?? scan.totalFindings ?? scan.findings?.length ?? 0);
+    const status = findings > 0 ? 'ISSUES' : 'CLEAN';
+    return { status, findings, scannedAt: scan.timestamp, cvesFixed: 0, totalCves: 0 };
+  } catch (e) {
+    return { status: 'PENDING', findings: 0, cvesFixed: 0, totalCves: 0 };
   }
-
-  // Also check .swarm/security for audit results
-  const auditPath = path.join(process.cwd(), '.swarm', 'security');
-  if (fs.existsSync(auditPath)) {
-    try {
-      const audits = fs.readdirSync(auditPath).filter(f => f.includes('audit'));
-      cvesFixed = Math.min(totalCves, Math.max(cvesFixed, audits.length));
-    } catch (e) {
-      // Ignore
-    }
-  }
-
-  const status = cvesFixed >= totalCves ? 'CLEAN' : cvesFixed > 0 ? 'IN_PROGRESS' : 'PENDING';
-
-  return {
-    status,
-    cvesFixed,
-    totalCves,
-  };
 }
 
 // Get swarm status
@@ -241,8 +265,8 @@ function generateStatusline() {
   const system = getSystemMetrics();
   const lines = [];
 
-  // Header Line
-  let header = `${c.bold}${c.brightPurple}▊ RuFlo V3.5 ${c.reset}`;
+  // Header Line — #1892: BANNER_VERSION resolved at module load from package.json
+  let header = `${c.bold}${c.brightPurple}▊ RuFlo${BANNER_VERSION ? ' ' + BANNER_VERSION : ''} ${c.reset}`;
   header += `${swarm.coordinationActive ? c.brightCyan : c.dim}● ${c.brightCyan}${user.name}${c.reset}`;
   if (user.gitBranch) {
     header += `  ${c.dim}│${c.reset}  ${c.brightBlue}⎇ ${user.gitBranch}${c.reset}`;
@@ -270,7 +294,7 @@ function generateStatusline() {
   lines.push(
     `${c.brightYellow}🤖 Swarm${c.reset}  ${swarmIndicator} [${agentsColor}${String(swarm.activeAgents).padStart(2)}${c.reset}/${c.brightWhite}${swarm.maxAgents}${c.reset}]  ` +
     `${c.brightPurple}👥 ${system.subAgents}${c.reset}    ` +
-    `${securityIcon} ${securityColor}CVE ${security.cvesFixed}${c.reset}/${c.brightWhite}${security.totalCves}${c.reset}    ` +
+    `${securityIcon} ${securityColor}Findings ${security.findings || 0}${c.reset}    ` +
     `${c.brightCyan}💾 ${system.memoryMB}MB${c.reset}    ` +
     `${c.brightGreen}📂 ${String(system.contextPct).padStart(3)}%${c.reset}    ` +
     `${c.dim}🧠 ${String(system.intelligencePct).padStart(3)}%${c.reset}`

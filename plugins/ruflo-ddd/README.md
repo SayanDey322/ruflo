@@ -61,8 +61,31 @@ src/<context-name>/
 
 Detected via import analysis: upstream/downstream, ACL, shared kernel, published language. Boundary violations (direct cross-context imports) are flagged by `ddd validate`.
 
+## Compatibility
+
+- **CLI:** pinned to `@claude-flow/cli` v3.6 major+minor.
+- **Verification:** `bash plugins/ruflo-ddd/scripts/smoke.sh` is the contract.
+
+## Namespace coordination
+
+This plugin owns the `ddd-patterns` AgentDB namespace (kebab-case, follows the convention from [ruflo-agentdb ADR-0001 §"Namespace convention"](../ruflo-agentdb/docs/adrs/0001-agentdb-optimization.md)). Reserved namespaces (`pattern`, `claude-memories`, `default`) MUST NOT be shadowed.
+
+`ddd-patterns` stores reusable bounded-context shapes, aggregate templates, and event vocabularies for cross-project reuse. Accessed via `memory_*` tools (namespace-routed).
+
+## Verification
+
+```bash
+bash plugins/ruflo-ddd/scripts/smoke.sh
+# Expected: "10 passed, 0 failed"
+```
+
+## Architecture Decisions
+
+- [`ADR-0001` — ruflo-ddd plugin contract](./docs/adrs/0001-ddd-contract.md)
+
 ## Related Plugins
 
+- `ruflo-agentdb` — namespace convention owner; backing store for the domain graph
 - `ruflo-adr` -- Document domain decisions as Architecture Decision Records
 - `ruflo-sparc` -- Architecture phase leverages DDD bounded context patterns
 - `ruflo-migrations` -- Align migration boundaries with aggregate roots

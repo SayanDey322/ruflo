@@ -3,7 +3,8 @@
  * Background process management, daemon mode, and monitoring
  */
 
-import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
+import { readdirSync, writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
+import { cpus, loadavg, totalmem, freemem } from 'node:os';
 import { dirname, resolve } from 'path';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 
@@ -253,11 +254,10 @@ const monitorCommand: Command = {
     const alerts = ctx.flags?.alerts !== false;
 
     // Gather real system metrics where possible
-    const os = await import('node:os');
     const memUsage = process.memoryUsage();
-    const loadAvg = os.loadavg();
-    const totalMem = os.totalmem();
-    const freeMem = os.freemem();
+    const loadAvg = loadavg();
+    const totalMem = totalmem();
+    const freeMem = freemem();
     const usedMemMB = Math.round((totalMem - freeMem) / 1024 / 1024);
     const totalMemMB = Math.round(totalMem / 1024 / 1024);
 
@@ -291,7 +291,7 @@ const monitorCommand: Command = {
       system: {
         cpuLoadAvg1m: loadAvg[0] !== undefined ? parseFloat(loadAvg[0].toFixed(2)) : null,
         cpuLoadAvg5m: loadAvg[1] !== undefined ? parseFloat(loadAvg[1].toFixed(2)) : null,
-        cpuCount: os.cpus().length,
+        cpuCount: cpus().length,
         memoryUsedMB: usedMemMB,
         memoryTotalMB: totalMemMB,
         processRssMB: Math.round(memUsage.rss / 1024 / 1024),
@@ -650,7 +650,6 @@ const logsCommand: Command = {
 
     if (existsSync(logsDir)) {
       try {
-        const { readdirSync } = await import('node:fs');
         const logFiles = readdirSync(logsDir)
           .filter(f => f.endsWith('.log'))
           .filter(f => source === 'all' || f.includes(source));

@@ -27,7 +27,12 @@ async function seedFetch(
   }
 }
 
-describe.sequential('Cognitum Seed Raw HTTP (real device)', () => {
+// Skip when no Cognitum Seed device is reachable (no SEED_ENDPOINT or
+// SEED_PAIRING_TOKEN configured). These hit a hardware endpoint at
+// 169.254.42.1 by default — they 30s-time-out in CI without a device.
+const __SEED_ENABLED = !!process.env.SEED_PAIRING_TOKEN && !!process.env.SEED_ENDPOINT;
+
+describe.skipIf(!__SEED_ENABLED).sequential('Cognitum Seed Raw HTTP (real device)', () => {
   it('GET /api/v1/status returns valid device status', async () => {
     const res = await seedFetch(`${SEED_ENDPOINT}/api/v1/status`);
     expect(res.ok).toBe(true);

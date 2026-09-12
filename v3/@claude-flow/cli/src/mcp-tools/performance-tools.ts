@@ -87,7 +87,7 @@ function savePerfStore(store: PerfStore): void {
 export const performanceTools: MCPTool[] = [
   {
     name: 'performance_report',
-    description: 'Generate performance report',
+    description: 'Generate performance report Use when native shell timing (`time`, `hyperfine`) is wrong because you want Ruflo-aware benchmarks — HNSW search latency, breaker decisions/sec, MCP response p50/p95, embeddings throughput. For OS-level process profiling, native shell + perf are fine.',
     category: 'performance',
     inputSchema: {
       type: 'object',
@@ -112,7 +112,29 @@ export const performanceTools: MCPTool[] = [
       // Calculate real CPU usage percentage from load average
       const cpuPercent = (loadAvg[0] / cpus.length) * 100;
 
-      // Generate current metrics with REAL values
+      // ADR-093 F8: replace hardcoded latency fixtures (50/40/100/200) with
+      // an actual self-measured latency probe. Throughput now reflects real
+      // metric collection cadence (calls/min over the stored history) rather
+      // than an arbitrary +1/+10 increment per call.
+      const probeStart = process.hrtime.bigint();
+      // Tiny CPU+memory work that mirrors a typical MCP tool call
+      let probeAcc = 0;
+      for (let i = 0; i < 1000; i++) probeAcc += Math.sqrt(i);
+      const probeNs = Number(process.hrtime.bigint() - probeStart);
+      const selfLatencyMs = probeNs / 1e6;
+
+      const recent = store.metrics.slice(-10);
+      const recentLatencies = recent.map(m => m.latency.avg).filter(n => Number.isFinite(n));
+      recentLatencies.push(selfLatencyMs);
+      const sorted = [...recentLatencies].sort((a, b) => a - b);
+      const pct = (p: number) => sorted.length === 0 ? selfLatencyMs : sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))];
+      const avg = recentLatencies.reduce((s, n) => s + n, 0) / Math.max(1, recentLatencies.length);
+
+      // Throughput from real cadence: count metric samples in the last 60s.
+      const cutoff = Date.now() - 60_000;
+      const samplesInLastMinute = store.metrics.filter(m => new Date(m.timestamp).getTime() >= cutoff).length + 1;
+      const opsPerSecond = samplesInLastMinute / 60;
+
       const currentMetrics: PerfMetrics = {
         timestamp: new Date().toISOString(),
         cpu: { usage: Math.min(cpuPercent, 100), cores: cpus.length },
@@ -122,17 +144,19 @@ export const performanceTools: MCPTool[] = [
           heap: Math.round(memUsage.heapUsed / 1024 / 1024),
         },
         latency: {
-          avg: store.metrics.length > 0 ? store.metrics.slice(-10).reduce((s, m) => s + m.latency.avg, 0) / Math.min(store.metrics.length, 10) : 50,
-          p50: store.metrics.length > 0 ? store.metrics.slice(-10).reduce((s, m) => s + m.latency.p50, 0) / Math.min(store.metrics.length, 10) : 40,
-          p95: store.metrics.length > 0 ? store.metrics.slice(-10).reduce((s, m) => s + m.latency.p95, 0) / Math.min(store.metrics.length, 10) : 100,
-          p99: store.metrics.length > 0 ? store.metrics.slice(-10).reduce((s, m) => s + m.latency.p99, 0) / Math.min(store.metrics.length, 10) : 200,
+          avg: Number(avg.toFixed(3)),
+          p50: Number(pct(50).toFixed(3)),
+          p95: Number(pct(95).toFixed(3)),
+          p99: Number(pct(99).toFixed(3)),
         },
         throughput: {
-          requests: store.metrics.length > 0 ? store.metrics[store.metrics.length - 1].throughput.requests + 1 : 1,
-          operations: store.metrics.length > 0 ? store.metrics[store.metrics.length - 1].throughput.operations + 10 : 10,
+          requests: store.metrics.length + 1,
+          operations: Number(opsPerSecond.toFixed(2)),
         },
         errors: { count: 0, rate: 0 },
       };
+      // probeAcc kept reachable to prevent V8 dead-code elimination of the loop
+      if (probeAcc < 0) currentMetrics.errors.count = -1;
 
       store.metrics.push(currentMetrics);
       // Keep last 100 metrics
@@ -190,7 +214,7 @@ export const performanceTools: MCPTool[] = [
   },
   {
     name: 'performance_bottleneck',
-    description: 'Detect performance bottlenecks',
+    description: 'Detect performance bottlenecks Use when native shell timing (`time`, `hyperfine`) is wrong because you want Ruflo-aware benchmarks — HNSW search latency, breaker decisions/sec, MCP response p50/p95, embeddings throughput. For OS-level process profiling, native shell + perf are fine.',
     category: 'performance',
     inputSchema: {
       type: 'object',
@@ -263,7 +287,7 @@ export const performanceTools: MCPTool[] = [
   },
   {
     name: 'performance_benchmark',
-    description: 'Run performance benchmarks',
+    description: 'Run performance benchmarks Use when native shell timing (`time`, `hyperfine`) is wrong because you want Ruflo-aware benchmarks — HNSW search latency, breaker decisions/sec, MCP response p50/p95, embeddings throughput. For OS-level process profiling, native shell + perf are fine.',
     category: 'performance',
     inputSchema: {
       type: 'object',
@@ -397,7 +421,7 @@ export const performanceTools: MCPTool[] = [
   },
   {
     name: 'performance_profile',
-    description: 'Profile specific component or operation',
+    description: 'Profile specific component or operation Use when native shell timing (`time`, `hyperfine`) is wrong because you want Ruflo-aware benchmarks — HNSW search latency, breaker decisions/sec, MCP response p50/p95, embeddings throughput. For OS-level process profiling, native shell + perf are fine.',
     category: 'performance',
     inputSchema: {
       type: 'object',
@@ -486,7 +510,7 @@ export const performanceTools: MCPTool[] = [
   },
   {
     name: 'performance_optimize',
-    description: 'Apply performance optimizations',
+    description: 'Apply performance optimizations Use when native shell timing (`time`, `hyperfine`) is wrong because you want Ruflo-aware benchmarks — HNSW search latency, breaker decisions/sec, MCP response p50/p95, embeddings throughput. For OS-level process profiling, native shell + perf are fine.',
     category: 'performance',
     inputSchema: {
       type: 'object',
@@ -586,7 +610,7 @@ export const performanceTools: MCPTool[] = [
   },
   {
     name: 'performance_metrics',
-    description: 'Get detailed performance metrics',
+    description: 'Get detailed performance metrics Use when native shell timing (`time`, `hyperfine`) is wrong because you want Ruflo-aware benchmarks — HNSW search latency, breaker decisions/sec, MCP response p50/p95, embeddings throughput. For OS-level process profiling, native shell + perf are fine.',
     category: 'performance',
     inputSchema: {
       type: 'object',

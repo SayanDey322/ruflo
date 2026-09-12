@@ -232,7 +232,7 @@ describe('Plugin Creator Plugin', () => {
 
       expect(definition.type).toBe('coordinator');
       expect(definition.name).toBe('coordinator Agent');
-      expect(definition.model).toBe('claude-sonnet-4-20250514');
+      expect(definition.model).toBe('claude-sonnet-4-6');
       expect(code).toContain('AgentTypeDefinition');
     });
 

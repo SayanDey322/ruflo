@@ -580,7 +580,11 @@ describe('Memory Commands', () => {
   });
 
   describe('memory search', () => {
-    it('should search memory', async () => {
+    // 60s timeout: a cold ONNX cache pulls a 23MB model from huggingface
+    // before the first search. Default 5s vitest timeout reliably trips on
+    // a fresh checkout. Bumping per-test rather than file-wide so the rest
+    // of the suite still fails fast on regressions.
+    it('should search memory', { timeout: 60_000 }, async () => {
       const searchCmd = memoryCommand.subcommands?.find(c => c.name === 'search');
       expect(searchCmd).toBeDefined();
 

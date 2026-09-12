@@ -14,20 +14,10 @@
  */
 
 export { QLearningRouter, createQLearningRouter, type QLearningRouterConfig, type RouteDecision } from './q-learning-router.js';
-export {
-  MoERouter,
-  getMoERouter,
-  resetMoERouter,
-  createMoERouter,
-  EXPERT_NAMES,
-  NUM_EXPERTS,
-  INPUT_DIM,
-  HIDDEN_DIM,
-  type ExpertType,
-  type MoERouterConfig,
-  type RoutingResult,
-  type LoadBalanceStats,
-} from './moe-router.js';
+// #1773 item 4 — moe-router migrated to @claude-flow/neural. Direct
+// consumers (hooks-tools.ts) import from '@claude-flow/neural' explicitly;
+// re-exporting through this barrel would force vitest to resolve the
+// neural pkg's transitive @ruvector/sona dep eagerly. Keep imports direct.
 export { ASTAnalyzer, createASTAnalyzer, type ASTAnalysis, type ASTNode, type ASTAnalyzerConfig } from './ast-analyzer.js';
 export {
   DiffClassifier,
@@ -100,17 +90,10 @@ export {
   type CircularDependency,
   type GraphAnalysisResult,
 } from './graph-analyzer.js';
-export {
-  FlashAttention,
-  getFlashAttention,
-  resetFlashAttention,
-  computeAttention,
-  benchmarkFlashAttention,
-  getFlashAttentionSpeedup,
-  type FlashAttentionConfig,
-  type AttentionResult,
-  type BenchmarkResult,
-} from './flash-attention.js';
+// #1773 item 4 — flash-attention migrated to @claude-flow/neural. Direct
+// consumers (hooks-tools.ts, neural-tools.ts) import from '@claude-flow/neural'
+// explicitly; re-exporting through this barrel pulls the package's
+// transitive @ruvector/sona dep into vitest's eager resolution.
 export {
   LoRAAdapter,
   getLoRAAdapter,
@@ -119,6 +102,9 @@ export {
   adaptEmbedding,
   trainLoRA,
   getLoRAStats,
+  loadLatestCheckpoint,
+  latestCheckpointInfo,
+  formatCheckpointAge,
   DEFAULT_RANK,
   DEFAULT_ALPHA,
   INPUT_DIM as LORA_INPUT_DIM,
@@ -127,6 +113,7 @@ export {
   type LoRAWeights,
   type AdaptationResult,
   type LoRAStats,
+  type CheckpointInfo,
 } from './lora-adapter.js';
 export {
   ModelRouter,
@@ -224,7 +211,14 @@ export async function isRuvectorAvailable(): Promise<boolean> {
  */
 export async function isWasmBackendAvailable(): Promise<boolean> {
   try {
-    const wasm = await import('@ruvector/learning-wasm');
+    // Indirect the specifier through a string variable so tsc doesn't
+    // statically resolve this optional dep at build time (TS2307 when
+    // absent — #2586 pattern). Same runtime behaviour: try/catch guards.
+    const learningWasmPkg: string = '@ruvector/learning-wasm';
+    const wasm = (await import(learningWasmPkg)) as {
+      WasmMicroLoRA?: unknown;
+      initSync?: unknown;
+    };
     return typeof wasm.WasmMicroLoRA === 'function' && typeof wasm.initSync === 'function';
   } catch {
     return false;

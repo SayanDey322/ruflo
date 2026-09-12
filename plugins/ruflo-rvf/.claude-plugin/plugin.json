@@ -1,7 +1,7 @@
 {
   "name": "ruflo-rvf",
   "description": "RVF format for portable agent memory, session persistence, and cross-platform transfer",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "author": {
     "name": "ruvnet",
     "url": "https://github.com/ruvnet"
@@ -14,6 +14,9 @@
     "memory",
     "session",
     "persistence",
-    "transfer"
+    "transfer",
+    "mcp",
+    "cognitive-containers",
+    "lineage-tracking"
   ]
 }

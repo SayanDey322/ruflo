@@ -9,7 +9,7 @@ import { type MCPTool, getProjectCwd } from './types.js';
 import { validateIdentifier, validateText } from './validate-input.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 
 // Storage paths
 const STORAGE_DIR = '.claude-flow';
@@ -69,13 +69,68 @@ function saveGitHubStore(store: GitHubStore): void {
   writeFileSync(getGitHubPath(), JSON.stringify(store, null, 2), 'utf-8');
 }
 
-/** Run a shell command, return stdout or null on failure */
+/**
+ * Run a shell command, return stdout or null on failure.
+ *
+ * SECURITY (audit_1776853149979): only call this with a STATIC command
+ * string (no template-string interpolation of user input). For any
+ * caller that needs to pass dynamic / user-supplied values, use
+ * runArgv below — it routes through execFileSync with shell:false so
+ * backticks, $(...), ;, and friends become literal argv bytes.
+ *
+ * The shell-string form is preserved here only because the surviving
+ * callers (`gh issue list ...`, `git rev-list --count HEAD`, …) use
+ * pipes / wc -l and need a shell. Any new caller with user input
+ * MUST use runArgv.
+ */
 function run(cmd: string, cwd?: string): string | null {
   try {
     return execSync(cmd, { encoding: 'utf-8', timeout: 15000, cwd: cwd || getProjectCwd(), stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   } catch {
     return null;
   }
+}
+
+/**
+ * Run a program with an argv array (no shell). Use this for any callsite
+ * that mixes user input into the command line — argv elements aren't
+ * interpreted by /bin/sh, so shell metacharacters in user-supplied
+ * strings stay literal.
+ */
+function runArgv(file: string, args: string[], cwd?: string): string | null {
+  try {
+    return execFileSync(file, args, {
+      encoding: 'utf-8',
+      timeout: 15000,
+      cwd: cwd || getProjectCwd(),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: false,
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Coerce a user-supplied PR / issue / run number to a positive integer.
+ * Returns null if the input can't be safely passed as an argv element to
+ * gh (which would otherwise accept any string).
+ */
+function toPositiveInt(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0 || n > 2 ** 31) return null;
+  return n;
+}
+
+const LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9 _\-./]{0,63}$/;
+function sanitizeLabels(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const out: string[] = [];
+  for (const v of value) {
+    if (typeof v !== 'string' || !LABEL_RE.test(v)) return null;
+    out.push(v);
+  }
+  return out;
 }
 
 /** Check if gh CLI is available */
@@ -86,7 +141,7 @@ function hasGhCli(): boolean {
 export const githubTools: MCPTool[] = [
   {
     name: 'github_repo_analyze',
-    description: 'Analyze a GitHub repository',
+    description: 'Analyze a GitHub repository Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     category: 'github',
     inputSchema: {
       type: 'object',
@@ -170,7 +225,7 @@ export const githubTools: MCPTool[] = [
   },
   {
     name: 'github_pr_manage',
-    description: 'Manage pull requests',
+    description: 'Manage pull requests Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     category: 'github',
     inputSchema: {
       type: 'object',
@@ -217,7 +272,17 @@ export const githubTools: MCPTool[] = [
           const headBranch = (input.branch as string) || run('git rev-parse --abbrev-ref HEAD') || 'feature';
           const baseBranch = (input.baseBranch as string) || 'main';
           const body = (input.body as string) || '';
-          const result = run(`gh pr create --title "${title.replace(/"/g, '\\"')}" --base "${baseBranch}" --head "${headBranch}" --body "${body.replace(/"/g, '\\"')}"`);
+          // audit_1776853149979: title/body only had length validation, and
+          // the inline .replace(/"/g, '\\"') was a porous escape (no handling
+          // of `, $(...), \). Routes via argv array now — no shell to
+          // interpret metas.
+          const result = runArgv('gh', [
+            'pr', 'create',
+            '--title', title,
+            '--base', baseBranch,
+            '--head', headBranch,
+            '--body', body,
+          ]);
           if (result) {
             return { success: true, _real: true, action: 'created', url: result };
           }
@@ -231,41 +296,47 @@ export const githubTools: MCPTool[] = [
       }
 
       if (action === 'review') {
-        const prNumber = input.prNumber as number;
+        // audit_1776853149979: prNumber was typed `number` in schema but only
+        // cast at runtime, so a string "1; touch /tmp/x" would interpolate
+        // into the shell. Coerce + validate as positive integer.
+        const prNumber = toPositiveInt(input.prNumber);
         if (gh && prNumber) {
-          const raw = run(`gh pr view ${prNumber} --json number,title,state,body,additions,deletions,changedFiles,reviews,mergeable,statusCheckRollup`);
+          const raw = runArgv('gh', [
+            'pr', 'view', String(prNumber),
+            '--json', 'number,title,state,body,additions,deletions,changedFiles,reviews,mergeable,statusCheckRollup',
+          ]);
           if (raw) {
             try {
               return { success: true, _real: true, action: 'review', pullRequest: JSON.parse(raw) };
             } catch { /* fall through */ }
           }
         }
-        return { success: false, error: prNumber ? 'gh CLI not available or PR not found. Install gh: https://cli.github.com' : 'prNumber is required for review.' };
+        return { success: false, error: prNumber ? 'gh CLI not available or PR not found. Install gh: https://cli.github.com' : 'prNumber is required (positive integer) for review.' };
       }
 
       if (action === 'merge') {
-        const prNumber = input.prNumber as number;
+        const prNumber = toPositiveInt(input.prNumber);
         if (gh && prNumber) {
-          const result = run(`gh pr merge ${prNumber} --merge`);
+          const result = runArgv('gh', ['pr', 'merge', String(prNumber), '--merge']);
           if (result !== null) {
             return { success: true, _real: true, action: 'merged', prNumber, mergedAt: new Date().toISOString() };
           }
         }
         // Fallback: local store
-        const prKey = Object.keys(store.prs).find(k => k.includes(String(prNumber)));
+        const prKey = prNumber ? Object.keys(store.prs).find(k => k.includes(String(prNumber))) : undefined;
         if (prKey && store.prs[prKey]) { store.prs[prKey].status = 'merged'; saveGitHubStore(store); }
         return { success: true, source: 'local-store', action: 'merged', prNumber, mergedAt: new Date().toISOString() };
       }
 
       if (action === 'close') {
-        const prNumber = input.prNumber as number;
+        const prNumber = toPositiveInt(input.prNumber);
         if (gh && prNumber) {
-          const result = run(`gh pr close ${prNumber}`);
+          const result = runArgv('gh', ['pr', 'close', String(prNumber)]);
           if (result !== null) {
             return { success: true, _real: true, action: 'closed', prNumber, closedAt: new Date().toISOString() };
           }
         }
-        const prKey = Object.keys(store.prs).find(k => k.includes(String(prNumber)));
+        const prKey = prNumber ? Object.keys(store.prs).find(k => k.includes(String(prNumber))) : undefined;
         if (prKey && store.prs[prKey]) { store.prs[prKey].status = 'closed'; saveGitHubStore(store); }
         return { success: true, source: 'local-store', action: 'closed', prNumber, closedAt: new Date().toISOString() };
       }
@@ -275,7 +346,7 @@ export const githubTools: MCPTool[] = [
   },
   {
     name: 'github_issue_track',
-    description: 'Track and manage issues',
+    description: 'Track and manage issues Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     category: 'github',
     inputSchema: {
       type: 'object',
@@ -299,10 +370,17 @@ export const githubTools: MCPTool[] = [
       const store = loadGitHubStore();
       const action = (input.action as string) || 'list';
       const gh = hasGhCli();
+      // #2963 — owner/repo were validated but never passed to `gh`, so `gh`
+      // silently resolved the target repo from the cwd's git remote instead
+      // of the caller-specified one. `gh` accepts `--repo owner/repo` on
+      // every issue subcommand used here.
+      const owner = input.owner as string | undefined;
+      const repo = input.repo as string | undefined;
+      const repoArgs: string[] = owner && repo ? ['--repo', `${owner}/${repo}`] : [];
 
       if (action === 'list') {
         if (gh) {
-          const raw = run('gh issue list --state all --limit 20 --json number,title,state,labels,createdAt');
+          const raw = runArgv('gh', ['issue', 'list', '--state', 'all', '--limit', '20', '--json', 'number,title,state,labels,createdAt', ...repoArgs]);
           if (raw) {
             try {
               const issues = JSON.parse(raw);
@@ -317,10 +395,16 @@ export const githubTools: MCPTool[] = [
       if (action === 'create') {
         const title = (input.title as string) || 'New Issue';
         const body = (input.body as string) || '';
-        const labels = (input.labels as string[]) || [];
+        // audit_1776853149979: labels was joined into a shell string with no
+        // validation of the label content. sanitizeLabels rejects anything
+        // outside [A-Za-z0-9 _\-./] and caps each label at 64 chars.
+        const labels = sanitizeLabels(input.labels) ?? [];
         if (gh) {
-          const labelArg = labels.length > 0 ? ` --label "${labels.join(',')}"` : '';
-          const result = run(`gh issue create --title "${title.replace(/"/g, '\\"')}" --body "${body.replace(/"/g, '\\"')}"${labelArg}`);
+          const argv = ['issue', 'create', '--title', title, '--body', body, ...repoArgs];
+          if (labels.length > 0) {
+            argv.push('--label', labels.join(','));
+          }
+          const result = runArgv('gh', argv);
           if (result) {
             return { success: true, _real: true, action: 'created', url: result };
           }
@@ -333,32 +417,39 @@ export const githubTools: MCPTool[] = [
       }
 
       if (action === 'update') {
-        const issueNumber = input.issueNumber as number;
+        const issueNumber = toPositiveInt(input.issueNumber);
         if (gh && issueNumber) {
-          const parts: string[] = [];
-          if (input.title) parts.push(`--title "${(input.title as string).replace(/"/g, '\\"')}"`);
-          if (input.labels) parts.push(`--add-label "${(input.labels as string[]).join(',')}"`);
-          if (parts.length > 0) {
-            const result = run(`gh issue edit ${issueNumber} ${parts.join(' ')}`);
+          const argv = ['issue', 'edit', String(issueNumber)];
+          if (input.title) argv.push('--title', input.title as string);
+          if (input.labels) {
+            const labels = sanitizeLabels(input.labels);
+            if (labels === null) return { success: false, error: 'labels contains disallowed characters' };
+            if (labels.length > 0) argv.push('--add-label', labels.join(','));
+          }
+          if (argv.length > 3) {
+            const result = runArgv('gh', [...argv, ...repoArgs]);
             if (result !== null) return { success: true, _real: true, action: 'updated', issueNumber };
           }
         }
-        const issueKey = Object.keys(store.issues).find(k => k.includes(String(issueNumber)));
+        const issueKey = issueNumber ? Object.keys(store.issues).find(k => k.includes(String(issueNumber))) : undefined;
         if (issueKey && store.issues[issueKey]) {
           if (input.title) store.issues[issueKey].title = input.title as string;
-          if (input.labels) store.issues[issueKey].labels = input.labels as string[];
+          if (input.labels) {
+            const labels = sanitizeLabels(input.labels);
+            if (labels !== null) store.issues[issueKey].labels = labels;
+          }
           saveGitHubStore(store);
         }
         return { success: true, source: 'local-store', action: 'updated', issueNumber };
       }
 
       if (action === 'close') {
-        const issueNumber = input.issueNumber as number;
+        const issueNumber = toPositiveInt(input.issueNumber);
         if (gh && issueNumber) {
-          const result = run(`gh issue close ${issueNumber}`);
+          const result = runArgv('gh', ['issue', 'close', String(issueNumber), ...repoArgs]);
           if (result !== null) return { success: true, _real: true, action: 'closed', issueNumber, closedAt: new Date().toISOString() };
         }
-        const issueKey = Object.keys(store.issues).find(k => k.includes(String(issueNumber)));
+        const issueKey = issueNumber ? Object.keys(store.issues).find(k => k.includes(String(issueNumber))) : undefined;
         if (issueKey && store.issues[issueKey]) { store.issues[issueKey].status = 'closed'; saveGitHubStore(store); }
         return { success: true, source: 'local-store', action: 'closed', issueNumber, closedAt: new Date().toISOString() };
       }
@@ -368,7 +459,7 @@ export const githubTools: MCPTool[] = [
   },
   {
     name: 'github_workflow',
-    description: 'Manage GitHub Actions workflows',
+    description: 'Manage GitHub Actions workflows Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     category: 'github',
     inputSchema: {
       type: 'object',
@@ -411,7 +502,12 @@ export const githubTools: MCPTool[] = [
       if (action === 'status') {
         const workflowId = input.workflowId as string;
         if (workflowId) {
-          const raw = run(`gh run view ${workflowId} --json databaseId,displayTitle,status,conclusion,jobs`);
+          // workflowId is already validated by validateIdentifier above, but
+          // route through argv anyway for consistency / defense-in-depth.
+          const raw = runArgv('gh', [
+            'run', 'view', workflowId,
+            '--json', 'databaseId,displayTitle,status,conclusion,jobs',
+          ]);
           if (raw) {
             try { return { success: true, _real: true, run: JSON.parse(raw) }; } catch { /* fall through */ }
           }
@@ -427,7 +523,7 @@ export const githubTools: MCPTool[] = [
         const workflowId = input.workflowId as string;
         const ref = (input.ref as string) || 'main';
         if (workflowId) {
-          const result = run(`gh workflow run "${workflowId}" --ref "${ref}"`);
+          const result = runArgv('gh', ['workflow', 'run', workflowId, '--ref', ref]);
           if (result !== null) return { success: true, _real: true, action: 'triggered', workflowId, ref };
         }
         return { success: false, error: 'workflowId is required to trigger a workflow.' };
@@ -436,7 +532,7 @@ export const githubTools: MCPTool[] = [
       if (action === 'cancel') {
         const workflowId = input.workflowId as string;
         if (workflowId) {
-          const result = run(`gh run cancel ${workflowId}`);
+          const result = runArgv('gh', ['run', 'cancel', workflowId]);
           if (result !== null) return { success: true, _real: true, action: 'cancelled', runId: workflowId };
         }
         return { success: false, error: 'workflowId (run ID) is required to cancel.' };
@@ -447,7 +543,7 @@ export const githubTools: MCPTool[] = [
   },
   {
     name: 'github_metrics',
-    description: 'Get repository metrics and statistics',
+    description: 'Get repository metrics and statistics Use when native Bash / file tools are wrong because this MCP tool exposes Ruflo-specific state or controllers that have no shell equivalent. For tasks that fit a one-line native command, prefer that.',
     category: 'github',
     inputSchema: {
       type: 'object',

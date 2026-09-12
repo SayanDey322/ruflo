@@ -23,6 +23,9 @@ const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   { name: 'OpenAI', type: 'LLM', models: 'gpt-4o, gpt-4-turbo', envVar: 'OPENAI_API_KEY', configName: 'openai' },
   { name: 'OpenAI', type: 'Embedding', models: 'text-embedding-3-small/large', envVar: 'OPENAI_API_KEY', configName: 'openai' },
   { name: 'Google', type: 'LLM', models: 'gemini-pro, gemini-ultra', envVar: 'GOOGLE_API_KEY', configName: 'google' },
+  // #1725: Ollama Cloud — Tier-2 default per ADR-026 (~$100/mo flat-rate alternative
+  // to per-token pricing). OpenAI-compat API at https://ollama.com/v1/chat/completions.
+  { name: 'Ollama', type: 'LLM', models: 'gpt-oss:120b-cloud, llama3:70b-cloud, qwen2.5-coder:32b-cloud', envVar: 'OLLAMA_API_KEY', configName: 'ollama' },
   { name: 'Transformers.js', type: 'Embedding', models: 'Xenova/all-MiniLM-L6-v2' },
   { name: 'Agentic Flow', type: 'Embedding', models: 'ONNX optimized' },
   { name: 'Mock', type: 'All', models: 'mock-*' },
@@ -49,6 +52,7 @@ function resolveApiKey(
     anthropic: 'ANTHROPIC_API_KEY',
     openai: 'OPENAI_API_KEY',
     google: 'GOOGLE_API_KEY',
+    ollama: 'OLLAMA_API_KEY', // #1725 — Tier-2 routing
   };
   const envVar = envMapping[providerName.toLowerCase()];
   if (envVar && process.env[envVar]) {
@@ -83,6 +87,13 @@ async function testProviderConnectivity(
     google: {
       url: `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
       headers: {},
+    },
+    // #1725 — Ollama Cloud uses an OpenAI-compatible /v1 surface.
+    ollama: {
+      url: 'https://ollama.com/api/tags',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+      },
     },
   };
 

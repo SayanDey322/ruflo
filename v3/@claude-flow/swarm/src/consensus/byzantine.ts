@@ -4,6 +4,7 @@
  */
 
 import { EventEmitter } from 'events';
+import { createHash } from 'node:crypto';
 import {
   ConsensusProposal,
   ConsensusVote,
@@ -11,6 +12,7 @@ import {
   ConsensusConfig,
   SWARM_CONSTANTS,
 } from '../types.js';
+import type { ConsensusTransport, ConsensusMessage } from './transport.js';
 
 export type ByzantinePhase = 'pre-prepare' | 'prepare' | 'commit' | 'reply';
 
@@ -37,6 +39,15 @@ export interface ByzantineNode {
 export interface ByzantineConfig extends Partial<ConsensusConfig> {
   maxFaultyNodes?: number;
   viewChangeTimeoutMs?: number;
+  /**
+   * ADR-095 G2 — optional pluggable transport. When set, PBFT messages
+   * (pre-prepare/prepare/commit) go over it (and are signed if the
+   * transport has a keypair) instead of being `emit`ted into the void.
+   * When unset, behavior is unchanged: messages are emitted as
+   * `message.broadcast` / `message.sent` events for an external wiring
+   * layer to relay (the legacy single-process path).
+   */
+  transport?: ConsensusTransport;
 }
 
 export class ByzantineConsensus extends EventEmitter {
@@ -47,6 +58,7 @@ export class ByzantineConsensus extends EventEmitter {
   private messageLog: Map<string, ByzantineMessage[]> = new Map();
   private proposalCounter: number = 0;
   private viewChangeTimeout?: NodeJS.Timeout;
+  private readonly transport?: ConsensusTransport;
 
   constructor(nodeId: string, config: ByzantineConfig = {}) {
     super();
@@ -55,9 +67,11 @@ export class ByzantineConsensus extends EventEmitter {
       timeoutMs: config.timeoutMs ?? SWARM_CONSTANTS.DEFAULT_CONSENSUS_TIMEOUT_MS,
       maxRounds: config.maxRounds ?? 10,
       requireQuorum: config.requireQuorum ?? true,
-      maxFaultyNodes: config.maxFaultyNodes ?? 1,
+      maxFaultyNodes: config.maxFaultyNodes, // #G2: undefined → byzantineF() derives from cluster size; a value caps it
       viewChangeTimeoutMs: config.viewChangeTimeoutMs ?? 5000,
+      transport: config.transport,
     };
+    this.transport = config.transport;
 
     this.node = {
       id: nodeId,
@@ -67,6 +81,42 @@ export class ByzantineConsensus extends EventEmitter {
       preparedMessages: new Map(),
       committedMessages: new Map(),
     };
+
+    // ADR-095 G2 — when a transport is wired, route inbound PBFT messages
+    // through the protocol handlers. The transport handles signature
+    // verification (if signing is enabled) before we ever see the message.
+    if (this.transport) {
+      this.transport.onMessage(async (msg: ConsensusMessage) => {
+        await this.handleInboundMessage(msg);
+      });
+    }
+  }
+
+  /**
+   * ADR-095 G2 — dispatch an inbound transport message to the right PBFT
+   * handler. The transport has already verified the signature (if signing
+   * is on); here we only need to demux by type and reconstruct the
+   * ByzantineMessage shape the handlers expect.
+   */
+  private async handleInboundMessage(msg: ConsensusMessage): Promise<void> {
+    const p = msg.payload as Partial<ByzantineMessage> | undefined;
+    if (!p || typeof p.viewNumber !== 'number' || typeof p.sequenceNumber !== 'number' || typeof p.digest !== 'string') return;
+    const bm: ByzantineMessage = {
+      type: (msg.type as ByzantinePhase) ?? p.type ?? 'prepare',
+      viewNumber: p.viewNumber,
+      sequenceNumber: p.sequenceNumber,
+      digest: p.digest,
+      senderId: msg.from,
+      timestamp: p.timestamp ? new Date(p.timestamp as unknown as string) : new Date(),
+      payload: p.payload,
+      signature: msg.signature,
+    };
+    switch (bm.type) {
+      case 'pre-prepare': await this.handlePrePrepare(bm); break;
+      case 'prepare': await this.handlePrepare(bm); break;
+      case 'commit': await this.handleCommit(bm); break;
+      default: break;
+    }
   }
 
   async initialize(): Promise<void> {
@@ -97,6 +147,20 @@ export class ByzantineConsensus extends EventEmitter {
 
   removeNode(nodeId: string): void {
     this.nodes.delete(nodeId);
+  }
+
+  /**
+   * ADR-095 G2 — BFT fault tolerance f, derived from the *actual* cluster
+   * size unless explicitly capped via config.maxFaultyNodes. PBFT needs
+   * n ≥ 3f+1, so f = floor((n-1)/3) where n = self + known peers. The
+   * config value (if set) acts as an upper bound — never exceed what the
+   * operator declared the cluster can tolerate.
+   */
+  private byzantineF(): number {
+    const n = this.nodes.size + 1; // self + known peers
+    const derived = Math.max(1, Math.floor((n - 1) / 3));
+    const cap = this.config.maxFaultyNodes;
+    return cap === undefined ? derived : Math.min(derived, cap);
   }
 
   electPrimary(): string {
@@ -172,7 +236,7 @@ export class ByzantineConsensus extends EventEmitter {
     proposal.votes.set(vote.voterId, vote);
 
     // Check consensus
-    const f = this.config.maxFaultyNodes ?? 1;
+    const f = this.byzantineF();
     const n = this.nodes.size + 1;
     const requiredVotes = 2 * f + 1;
 
@@ -271,7 +335,7 @@ export class ByzantineConsensus extends EventEmitter {
     }
 
     // Check if prepared (2f + 1 prepare messages)
-    const f = this.config.maxFaultyNodes ?? 1;
+    const f = this.byzantineF();
     const prepareCount = messages.filter(m => m.type === 'prepare').length;
 
     if (prepareCount >= 2 * f + 1) {
@@ -321,7 +385,7 @@ export class ByzantineConsensus extends EventEmitter {
     }
 
     // Check if committed (2f + 1 commit messages)
-    const f = this.config.maxFaultyNodes ?? 1;
+    const f = this.byzantineF();
     const commitCount = messages.filter(m => m.type === 'commit').length;
 
     if (commitCount >= 2 * f + 1) {
@@ -352,24 +416,43 @@ export class ByzantineConsensus extends EventEmitter {
   // ===== PRIVATE METHODS =====
 
   private async broadcastMessage(message: ByzantineMessage): Promise<void> {
+    // Always emit for observability / legacy external relay.
     this.emit('message.broadcast', { message });
-
-    // Broadcast to all registered nodes
     for (const node of this.nodes.values()) {
       this.emit('message.sent', { to: node.id, message });
+    }
+
+    // ADR-095 G2 — when a transport is wired, actually send the message
+    // over it (signed by the transport if signing is enabled). This is
+    // the real inter-node path; the emits above stay for observers.
+    if (this.transport) {
+      const cm: Omit<ConsensusMessage, 'from'> = {
+        type: message.type,
+        payload: {
+          type: message.type,
+          viewNumber: message.viewNumber,
+          sequenceNumber: message.sequenceNumber,
+          digest: message.digest,
+          timestamp: message.timestamp.toISOString(),
+          payload: message.payload,
+        },
+        viewNumber: message.viewNumber,
+      };
+      try {
+        await this.transport.broadcast(cm);
+      } catch {
+        // Transport failures are non-fatal at the protocol layer — the
+        // proposal will simply not reach consensus and time out, which is
+        // the correct failure mode (no liveness, but no incorrect commit).
+      }
     }
   }
 
   private computeDigest(value: unknown): string {
-    // Simple hash for demonstration
-    const str = JSON.stringify(value);
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
-    }
-    return hash.toString(16);
+    // ADR-095 G2 — was a 32-bit string-hash "for demonstration"; replaced
+    // with sha256 so digests are collision-resistant (PBFT relies on the
+    // digest uniquely identifying the request being agreed on).
+    return createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex');
   }
 
   private createResult(proposal: ConsensusProposal, durationMs: number): ConsensusResult {

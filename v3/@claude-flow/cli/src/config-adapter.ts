@@ -132,7 +132,7 @@ export function v3ConfigToSystemConfig(v3Config: V3Config): Partial<SystemConfig
     },
 
     mcp: {
-      name: 'claude-flow',
+      name: 'ruflo',
       version: '3.0.0',
       transport: {
         type: v3Config.mcp.transportType as 'stdio' | 'http' | 'websocket',
@@ -164,6 +164,7 @@ function normalizeTopology(
     case 'hierarchical-mesh':
       return topology;
     case 'adaptive':
+    case 'pheromone-adaptive':
       return 'hybrid';
     default:
       return 'hierarchical';

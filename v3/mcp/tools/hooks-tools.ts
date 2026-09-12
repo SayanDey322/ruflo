@@ -17,6 +17,8 @@
  */
 
 import { z } from 'zod';
+import * as path from 'path';
+import * as fs from 'fs';
 import { MCPTool, ToolContext } from '../types.js';
 import {
   ReasoningBank,
@@ -37,6 +39,15 @@ let reasoningBankInitPromise: Promise<void> | null = null;
  */
 async function getReasoningBank(): Promise<ReasoningBank> {
   if (!reasoningBankInstance) {
+    // Persist to .swarm/memory.db so post-* writes survive across processes
+    // and the metrics dashboard can read them back (#1686). Without dbPath
+    // ReasoningBank defaults to ':memory:' and writes vanish on exit.
+    const swarmDir = path.resolve(process.cwd(), '.swarm');
+    if (!fs.existsSync(swarmDir)) {
+      try { fs.mkdirSync(swarmDir, { recursive: true }); } catch { /* ignore */ }
+    }
+    const dbPath = path.join(swarmDir, 'memory.db');
+
     reasoningBankInstance = createReasoningBank({
       maxTrajectories: 5000,
       distillationThreshold: 0.6,
@@ -44,6 +55,7 @@ async function getReasoningBank(): Promise<ReasoningBank> {
       mmrLambda: 0.7,
       enableAgentDB: true,
       namespace: 'hooks-learning',
+      dbPath,
     });
 
     if (!reasoningBankInitPromise) {

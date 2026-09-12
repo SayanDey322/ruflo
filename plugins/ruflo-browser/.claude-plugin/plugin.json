@@ -1,7 +1,7 @@
 {
   "name": "ruflo-browser",
-  "description": "Agentic browser automation with Playwright for testing, scraping, and UI interaction",
-  "version": "0.1.0",
+  "description": "Session-as-skill browser automation: Playwright + RVF cognitive containers + ruvector trajectories + AgentDB selector memory + AIDefence PII/injection gates",
+  "version": "0.2.1",
   "author": {
     "name": "ruvnet",
     "url": "https://github.com/ruvnet"
@@ -14,6 +14,11 @@
     "playwright",
     "testing",
     "automation",
-    "scraping"
+    "scraping",
+    "rvf",
+    "replay",
+    "trajectory",
+    "agentdb",
+    "aidefence"
   ]
 }
